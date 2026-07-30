@@ -1,0 +1,128 @@
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import date
+import pandas as pd
+
+
+class VisitorProfileRequest(BaseModel):
+    user_id: str
+
+    trip_start_date: date
+    trip_end_date: Optional[date] = None
+
+    city: List[str]
+
+    daily_food_budget: str          
+    daily_attraction_budget: str    
+    activity_preferences: List[str] = []
+    activity_other: Optional[str] = None
+
+    cuisine_preferences: List[str] = []
+    cuisine_other: Optional[str] = None
+
+    event_preferences: List[str] = []         
+
+    attraction_environment: List[str] = []      
+    weather_preference: List[str] = []          
+    crowdedness_preference: Optional[str] = None  
+
+    traveling_with_kids: bool
+
+    num_recommendations: int = 5
+    additional_notes: Optional[str] = None
+
+
+# Translation dict: quiz label, keywords that actually appear in your dataset's categories/description text
+ACTIVITY_KEYWORDS = {
+    "Culture focused (Museum/Galleries/..)": "culture museum galleries",
+    "Nature focused (Beach/Desert/Parks/...)": "nature beach desert parks",
+    "Shopping (Malls/Exhibitions/...)": "shopping malls exhibitions",
+    "Adventure (Kayaking/ Desert Driving/ ...)": "adventure kayaking desert driving",
+    "Kids Friendly": "kids friendly family",
+}
+
+ALL_ENVIRONMENTS = ["indoor", "outdoor"]
+
+ALL_CUISINES = ["Emirati", "Indian", "Italian", "American", "Lebanese", "Greek"]
+ALL_ACTIVITIES = [
+    "Culture focused (Museum/Galleries/..)",
+    "Nature focused (Beach/Desert/Parks/...)",
+    "Shopping (Malls/Exhibitions/...)",
+    "Adventure (Kayaking/ Desert Driving/ ...)",
+    "Kids Friendly",
+]
+
+
+def build_restaurant_profile(req: VisitorProfileRequest) -> dict:
+    cuisines = list(req.cuisine_preferences) or ALL_CUISINES  
+    if req.cuisine_other:
+        cuisines.append(req.cuisine_other)
+
+    return {
+        "city": req.city,
+        "cuisines": cuisines,
+        "budget": req.daily_food_budget,
+        "top_n": req.num_recommendations,
+    }
+
+
+def build_event_profile(req: VisitorProfileRequest) -> dict:
+
+    BUDGET_LEVELS = {
+        "free": ["Free"],
+        "low": ["Free", "Low"],
+        "medium": ["Free", "Low", "Medium"],
+        "high": ["Free", "Low", "Medium", "High"],
+    }
+     
+    budget = BUDGET_LEVELS.get(
+        req.daily_attraction_budget.lower(),
+        ["Free", "Low", "Medium", "High"],
+    )
+
+    environment = (
+        [e.capitalize() for e in req.attraction_environment]
+        or ["Indoor", "Outdoor", "Both"]
+    )
+
+    trip_end = req.trip_end_date or req.trip_start_date  
+
+    return {
+        "User_ID": req.user_id,
+        "Trip_Start_Date": pd.Timestamp(req.trip_start_date),
+        "Trip_End_Date": pd.Timestamp(trip_end),
+        "City": req.city,
+        "budget": budget,
+        "Event_Preferences": req.event_preferences or None,
+        "Activity_Preferences": req.activity_preferences,   
+        "Cuisine_Preferences": req.cuisine_preferences,
+        "Cuisine_Other": req.cuisine_other or "",
+        "Environment": environment,
+        "Family_Friendly": True if req.traveling_with_kids else None,
+        "Temp_Pref": req.weather_preference or None,
+        "Crowdedness_Preference": req.crowdedness_preference or "",
+        "Num_Recommendations": req.num_recommendations,
+        "special_note": req.additional_notes or "",
+    }
+
+
+def build_attraction_profile(req: VisitorProfileRequest) -> dict:
+    selected_activities = req.activity_preferences or ALL_ACTIVITIES  
+
+    keywords = [
+        ACTIVITY_KEYWORDS.get(label, label)
+        for label in selected_activities
+    ]
+    if req.activity_other:
+        keywords.append(req.activity_other)
+
+    environment = req.attraction_environment or ALL_ENVIRONMENTS  
+
+    return {
+        "city": req.city,
+        "attraction_preference": keywords,
+        "budget": req.daily_attraction_budget,
+        "environment": environment,
+        "with_kids": "Yes" if req.traveling_with_kids else "No",
+        "top_n": req.num_recommendations,
+    }
