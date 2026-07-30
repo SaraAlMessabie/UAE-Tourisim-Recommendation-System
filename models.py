@@ -41,20 +41,9 @@ ACTIVITY_KEYWORDS = {
     "Kids Friendly": "kids friendly family",
 }
 
-ALL_ENVIRONMENTS = ["indoor", "outdoor"]
-
-ALL_CUISINES = ["Emirati", "Indian", "Italian", "American", "Lebanese", "Greek"]
-ALL_ACTIVITIES = [
-    "Culture focused (Museum/Galleries/..)",
-    "Nature focused (Beach/Desert/Parks/...)",
-    "Shopping (Malls/Exhibitions/...)",
-    "Adventure (Kayaking/ Desert Driving/ ...)",
-    "Kids Friendly",
-]
-
 
 def build_restaurant_profile(req: VisitorProfileRequest) -> dict:
-    cuisines = list(req.cuisine_preferences) or ALL_CUISINES  
+    cuisines = list(req.cuisine_preferences)  
     if req.cuisine_other:
         cuisines.append(req.cuisine_other)
 
@@ -107,7 +96,7 @@ def build_event_profile(req: VisitorProfileRequest) -> dict:
 
 
 def build_attraction_profile(req: VisitorProfileRequest) -> dict:
-    selected_activities = req.activity_preferences or ALL_ACTIVITIES  
+    selected_activities = req.activity_preferences 
 
     keywords = [
         ACTIVITY_KEYWORDS.get(label, label)
@@ -116,7 +105,7 @@ def build_attraction_profile(req: VisitorProfileRequest) -> dict:
     if req.activity_other:
         keywords.append(req.activity_other)
 
-    environment = req.attraction_environment or ALL_ENVIRONMENTS  
+    environment = req.attraction_environment 
 
     return {
         "city": req.city,
