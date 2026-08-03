@@ -183,7 +183,7 @@ def get_attraction_recommendations(request: VisitorProfileRequest):
 @app.post("/hearts")
 def add_heart(heart: HeartRequest):
     try:
-        sheet = get_sheet("Hearts")
+        sheet = get_sheet("hearts")
         sheet.append_row([
             heart.user_id, heart.listing_type, heart.listing_id, str(datetime.now())
         ])
@@ -195,7 +195,7 @@ def add_heart(heart: HeartRequest):
 @app.get("/hearts/{user_id}")
 def get_hearts(user_id: str):
     try:
-        df = get_sheet_as_df("Hearts")
+        df = get_sheet_as_df("hearts")
         if df.empty:
             return []
         user_hearts = df[df["User_ID"] == user_id] if "User_ID" in df.columns else df[df["user_id"] == user_id]
@@ -212,7 +212,7 @@ def get_hearts(user_id: str):
 def add_review(review: ReviewRequest):
     try:
         sentiment = predict_sentiment(review.comment)
-        sheet = get_sheet("Reviews")
+        sheet = get_sheet("reviews")
         sheet.append_row([
             review.user_id, review.listing_type, review.listing_id,
             review.rating, review.comment, sentiment, str(datetime.now())
@@ -225,7 +225,7 @@ def add_review(review: ReviewRequest):
 @app.get("/reviews/{listing_id}")
 def get_reviews(listing_id: str):
     try:
-        df = get_sheet_as_df("Reviews")
+        df = get_sheet_as_df("reviews")
         if df.empty:
             return []
         listing_reviews = df[df["Listing_ID"] == listing_id] if "Listing_ID" in df.columns else df[df["listing_id"] == listing_id]
