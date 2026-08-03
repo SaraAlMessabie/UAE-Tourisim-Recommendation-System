@@ -34,6 +34,8 @@ def load_resources():
     global events_df, event_tfidf, event_vectors
     global restaurants_df, restaurant_tfidf, restaurant_vectors
     global attractions_df, attraction_tfidf, attraction_vectors
+    global sentiment_model, sentiment_vectorizer
+
 
     # --- Static catalogs (from GitHub) ---
     events_df = load_events_catalog()
@@ -44,17 +46,19 @@ def load_resources():
     attractions_df = load_attractions_catalog()
 
     # --- Saved vectorizers / similarity matrices ---
-    with open("artifacts/tfidf_vectorizer.pkl", "rb") as f:
+    with open("models and vectors/tfidf_vectorizer.pkl", "rb") as f:
         event_tfidf = pickle.load(f)
-    with open("artifacts/all_event_vectors.pkl", "rb") as f:
+    with open("models and vectors/all_event_vectors.pkl", "rb") as f:
         event_vectors = pickle.load(f)
 
-    restaurant_tfidf = joblib.load("artifacts/restaurant_tfidf.pkl")
-    restaurant_vectors = joblib.load("artifacts/restaurant_vectors.pkl")
+    restaurant_tfidf = joblib.load("models and vectors/restaurant_tfidf.pkl")
+    restaurant_vectors = joblib.load("models and vectors/restaurant_vectors.pkl")
 
-    attraction_tfidf = joblib.load("artifacts/attraction_tfidf.pkl")
-    attraction_vectors = joblib.load("artifacts/attraction_vectors.pkl")
+    attraction_tfidf = joblib.load("models and vectors/attraction_tfidf.pkl")
+    attraction_vectors = joblib.load("models and vectors/attraction_vectors.pkl")
 
+    sentiment_model = joblib.load("models and vectors/sentiment_model_best.joblib")
+    sentiment_vectorizer = joblib.load("models and vectors/sentiment_vectorizer.joblib")
     print("All resources loaded successfully.")
 
 
