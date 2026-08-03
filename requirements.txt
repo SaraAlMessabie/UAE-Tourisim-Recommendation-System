@@ -2,20 +2,18 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
+python-multipart==0.0.18
 
-# Data handling
-pandas==3.0.3
-numpy==2.2.1
-scipy==1.15.0
+# Data handling (compatible versions)
+pandas==2.1.4
+numpy==1.26.3
+scipy==1.11.4
 
-# Recommendation engine (TF-IDF, cosine similarity)
-scikit-learn==1.8.0
+# Recommendation engine
+scikit-learn==1.5.0
 joblib==1.4.2
 
-# Sentiment model (if using the sklearn Logistic Regression version)
-# — already covered by scikit-learn above, no extra package needed
-
-# Google Sheets connection (interaction data)
+# Google Sheets connection
 gspread==6.1.4
 google-auth==2.37.0
 
@@ -23,5 +21,5 @@ google-auth==2.37.0
 streamlit==1.59.2
 requests==2.32.3
 
-# CSV/data cleaning helpers used earlier
+# CSV/data cleaning helpers
 python-dateutil==2.9.0
