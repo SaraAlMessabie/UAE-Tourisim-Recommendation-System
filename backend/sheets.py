@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 import gspread
 import pandas as pd
 from google.oauth2.service_account import Credentials
@@ -11,8 +12,9 @@ SCOPES = [
 
 
 def _get_gspread_client():
-    creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-    if creds_json:
+    creds_b64 = os.environ.get("GOOGLE_CREDENTIALS_B64")
+    if creds_b64:
+        creds_json = base64.b64decode(creds_b64).decode("utf-8")
         creds_dict = json.loads(creds_json)
         creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
         return gspread.authorize(creds)

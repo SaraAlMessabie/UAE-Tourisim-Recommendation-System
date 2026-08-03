@@ -2,6 +2,21 @@
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
+
+REQUIRED_PROFILE_KEYS = ['Num_Recommendations', 'Trip_Start_Date', 'Trip_End_Date', 'User_ID']
+
+
+def parse_categories(categories_value):
+    """Categories in the catalog is a comma-separated string like
+    'Festival, Entertainment'. Normalize it into a clean list of
+    lowercase category names for reliable comparison."""
+    if isinstance(categories_value, str):
+        return [c.strip().lower() for c in categories_value.split(',') if c.strip()]
+    if isinstance(categories_value, (list, tuple, set)):
+        return [str(c).strip().lower() for c in categories_value]
+    return []
+
+
 def filtering_fallback(catalog_df, n_recommendation, Start_Date, End_Date, environment=None, city=None, budget=None, family_friendly=None, temp_pref=None, event_preference=None):
 
     base = catalog_df[
@@ -12,14 +27,23 @@ def filtering_fallback(catalog_df, n_recommendation, Start_Date, End_Date, envir
     if family_friendly is not None:
         base = base[base['Family_Friendly'] == family_friendly]
 
+    # Pre-parse Categories once, up front, instead of re-parsing per stage per row.
+    parsed_categories = base['Categories'].apply(parse_categories)
+
     stage_names = ['strict_match', 'relaxed_weather', 'relaxed_budget', 'expanded_city', 'relaxed_event']
-    candidates_df = pd.DataFrame()
+    stage_frames = []
+    matched_index = pd.Index([])
+
+    if event_preference is not None:
+        event_preference_lower = [e.strip().lower() for e in event_preference]
+    else:
+        event_preference_lower = None
 
     for stage_name in stage_names:
-        if len(candidates_df) >= n_recommendation:
+        if len(matched_index) >= n_recommendation:
             break
 
-        remaining = base[~base.index.isin(candidates_df.index)]
+        remaining = base[~base.index.isin(matched_index)]
         mask = pd.Series(True, index=remaining.index)
 
         if environment is not None:
@@ -33,21 +57,34 @@ def filtering_fallback(catalog_df, n_recommendation, Start_Date, End_Date, envir
         if budget is not None and stage_name in ['strict_match', 'relaxed_weather']:
             mask &= remaining['Price_Range'].isin(budget)
 
-        # Weather: one consistent field (temp_pref) checked against both max/min category columns
         if temp_pref is not None and stage_name == 'strict_match':
             mask &= (
                 remaining['Temp_max_Category'].isin(temp_pref) |
                 remaining['Temp_min_Category'].isin(temp_pref)
             )
 
-        if event_preference is not None and stage_name != 'relaxed_event':
-            mask &= remaining['Categories'].apply(lambda cats: any(e in cats for e in event_preference))
+        # Exact category matching against the parsed list, not substring matching
+        # on the raw comma-separated string.
+        if event_preference_lower is not None and stage_name != 'relaxed_event':
+            row_categories = parsed_categories.loc[remaining.index]
+            mask &= row_categories.apply(
+                lambda cats: any(e in cats for e in event_preference_lower)
+            )
 
         matches = remaining[mask].copy()
-        matches['fallback_stage'] = stage_name
-        candidates_df = pd.concat([candidates_df, matches])
+        if matches.empty:
+            continue
 
+        matches['fallback_stage'] = stage_name
+        stage_frames.append(matches)
+        matched_index = matched_index.union(matches.index)
+
+    if not stage_frames:
+        return base.iloc[0:0].assign(fallback_stage=pd.Series(dtype=object))
+
+    candidates_df = pd.concat(stage_frames)
     return candidates_df.head(n_recommendation)
+
 
 def build_visitor_text(visitor_profile):
     activities = ', '.join(visitor_profile.get('Activity_Preferences', []))
@@ -70,18 +107,34 @@ def build_visitor_text(visitor_profile):
     )
     return visitor_text
 
+
 def compute_similarity(candidates_df, visitor_profile, tfidf_vectorizer, all_event_vectors):
     visitor_text = build_visitor_text(visitor_profile)
     visitor_vector = tfidf_vectorizer.transform([visitor_text])
 
-    candidate_indices = candidates_df.index
-    candidate_vectors = all_event_vectors[candidate_indices]
+    if candidates_df.empty:
+        candidates_df = candidates_df.copy()
+        candidates_df['similarity_score'] = pd.Series(dtype=float)
+        return candidates_df
+
+    original_index = candidates_df.attrs.get('source_index', None)
+    if original_index is not None:
+        positions = original_index.get_indexer(candidates_df.index)
+        if (positions == -1).any():
+            raise ValueError(
+                "compute_similarity: some candidate rows could not be matched "
+                "back to the original catalog index used to build all_event_vectors."
+            )
+        candidate_vectors = all_event_vectors[positions]
+    else:
+        candidate_vectors = all_event_vectors[candidates_df.index]
 
     similarity_scores = cosine_similarity(candidate_vectors, visitor_vector).flatten()
 
     candidates_df = candidates_df.copy()
     candidates_df['similarity_score'] = similarity_scores
     return candidates_df
+
 
 def build_recommendation_reason(row, visitor_profile):
     reasons = {
@@ -97,8 +150,8 @@ def build_recommendation_reason(row, visitor_profile):
     if row.get('Family_Friendly') is True:
         extras.append('family-friendly')
 
-    prefs = set(p.lower() for p in visitor_profile.get('Activity_Preferences', []))
-    categories = set(c.lower() for c in row['Categories'])
+    categories = set(parse_categories(row['Categories']))
+    prefs = set(p.strip().lower() for p in visitor_profile.get('Activity_Preferences', []))
     matched_activities = prefs & categories
     if matched_activities:
         extras.append(f"matches your interest in {', '.join(matched_activities)}")
@@ -111,10 +164,14 @@ def build_recommendation_reason(row, visitor_profile):
 
     return reason
 
+
 def recommend_events(catalog_df, visitor_profile, tfidf_vectorizer, all_event_vectors):
+    missing_keys = [k for k in REQUIRED_PROFILE_KEYS if k not in visitor_profile]
+    if missing_keys:
+        raise ValueError(f"visitor_profile is missing required keys: {missing_keys}")
+
     n_recommendation = visitor_profile['Num_Recommendations']
 
-    # 1. Filter candidates using fallback stages
     candidates_df = filtering_fallback(
         catalog_df,
         n_recommendation=n_recommendation,
@@ -128,10 +185,17 @@ def recommend_events(catalog_df, visitor_profile, tfidf_vectorizer, all_event_ve
         event_preference=visitor_profile.get('Event_Preferences')
     )
 
-    # 2. Compute similarity score
+    candidates_df.attrs['source_index'] = catalog_df.index
+
+    if candidates_df.empty:
+        return {
+            "visitor_id": visitor_profile['User_ID'],
+            "num_results": 0,
+            "recommendations": [],
+        }
+
     candidates_df = compute_similarity(candidates_df, visitor_profile, tfidf_vectorizer, all_event_vectors)
 
-    # 3. Apply fallback-stage penalty
     stage_penalty = {
         'strict_match': 1.0,
         'relaxed_weather': 0.80,
@@ -141,29 +205,32 @@ def recommend_events(catalog_df, visitor_profile, tfidf_vectorizer, all_event_ve
     }
     candidates_df['final_score'] = candidates_df['similarity_score'] * candidates_df['fallback_stage'].map(stage_penalty)
 
-    # 4. Select Top-N
-    final_recommendations = candidates_df.sort_values('final_score', ascending=False).head(n_recommendation).copy()
+    sort_columns = ['final_score']
+    sort_ascending = [False]
+    if 'Name' in candidates_df.columns:
+        sort_columns.append('Name')
+        sort_ascending.append(True)
 
-    # 5. Add visitor_id and recommendation reason
+    final_recommendations = candidates_df.sort_values(
+        by=sort_columns, ascending=sort_ascending, kind='mergesort'
+    ).head(n_recommendation).copy()
+
     final_recommendations['visitor_id'] = visitor_profile['User_ID']
     final_recommendations['recommendation_reason'] = final_recommendations.apply(
         lambda row: build_recommendation_reason(row, visitor_profile), axis=1
     )
 
-    # 6. Round scoring columns
     final_recommendations[['similarity_score', 'final_score']] = final_recommendations[['similarity_score', 'final_score']].round(3)
 
-    # 7. Select and order required columns
     required_columns = [
         'visitor_id', 'Name', 'Categories', 'Location',
         'Start_Date', 'End_Date', 'Price_Range', 'similarity_score',
         'fallback_stage', 'final_score', 'recommendation_reason', 'Description'
     ]
     final_recommendations = final_recommendations[required_columns].sort_values(
-        by='final_score', ascending=False
+        by=sort_columns, ascending=sort_ascending, kind='mergesort'
     ).reset_index(drop=True)
 
-    # 8. Format for FastAPI: convert dates to strings, return a JSON-safe dict
     final_recommendations['Start_Date'] = final_recommendations['Start_Date'].dt.strftime('%Y-%m-%d')
     final_recommendations['End_Date'] = final_recommendations['End_Date'].dt.strftime('%Y-%m-%d')
 
@@ -174,4 +241,3 @@ def recommend_events(catalog_df, visitor_profile, tfidf_vectorizer, all_event_ve
         "num_results": len(records),
         "recommendations": records,
     }
-
