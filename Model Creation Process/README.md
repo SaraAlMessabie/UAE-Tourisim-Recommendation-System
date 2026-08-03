@@ -7,4 +7,5 @@ sentiment_model_best.joblib
 Restaurants_Model.ipynb use:
 zomato.csv
 
-Events
+Event_Model.ipynb use:
+events_dataset.csv
