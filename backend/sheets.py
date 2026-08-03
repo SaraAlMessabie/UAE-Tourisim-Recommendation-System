@@ -2,7 +2,7 @@ import gspread
 import pandas as pd
 
 # Connects using the service account credentials — never commit credentials.json to GitHub
-gc = gspread.service_account(filename="backend/credentials.json")
+gc = gspread.service_account(filename="credentials.json")
 spreadsheet = gc.open("TouristAppData")
 
 def get_sheet(tab_name):
