@@ -2,9 +2,9 @@ import pandas as pd
 import ast
 
 # Raw GitHub URLs for each static catalog
-EVENTS_URL = "https://github.com/SaraAlMessabie/UAE-Tourisim-Recommendation-System/blob/main/data/events.csv"
-RESTAURANTS_URL = "https://github.com/SaraAlMessabie/UAE-Tourisim-Recommendation-System/blob/main/data/restaurants.csv"
-ATTRACTIONS_URL = "https://github.com/SaraAlMessabie/UAE-Tourisim-Recommendation-System/commit/549440a96490103061b0e51ef8a38c4e91525e43"
+EVENTS_URL = "https://raw.githubusercontent.com/SaraAlMessabie/UAE-Tourisim-Recommendation-System/main/data/events.csv"
+RESTAURANTS_URL = "https://raw.githubusercontent.com/SaraAlMessabie/UAE-Tourisim-Recommendation-System/main/data/restaurants.csv"
+ATTRACTIONS_URL = "https://raw.githubusercontent.com/SaraAlMessabie/UAE-Tourisim-Recommendation-System/main/data/attractions.csv"
 
 
 def _parse_list_column(value):
