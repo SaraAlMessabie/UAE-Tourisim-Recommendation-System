@@ -4,35 +4,28 @@ from datetime import date
 import pandas as pd
 
 
+# --- Request schema (matches actual quiz form fields) ---
 class VisitorProfileRequest(BaseModel):
     user_id: str
-
     trip_start_date: date
     trip_end_date: Optional[date] = None
-
     city: List[str]
-
-    daily_food_budget: str          
-    daily_attraction_budget: str    
+    daily_food_budget: str
+    daily_attraction_budget: str
     activity_preferences: List[str] = []
     activity_other: Optional[str] = None
-
     cuisine_preferences: List[str] = []
     cuisine_other: Optional[str] = None
-
-    event_preferences: List[str] = []         
-
-    attraction_environment: List[str] = []      
-    weather_preference: List[str] = []          
-    crowdedness_preference: Optional[str] = None  
-
+    event_preferences: List[str] = []
+    attraction_environment: List[str] = []
+    weather_preference: List[str] = []
+    crowdedness_preference: Optional[str] = None
     traveling_with_kids: bool
-
     num_recommendations: int = 5
     additional_notes: Optional[str] = None
 
 
-# Translation dict: quiz label, keywords that actually appear in your dataset's categories/description text
+# --- Translation dict + builder functions (teammate's) ---
 ACTIVITY_KEYWORDS = {
     "Culture focused (Museum/Galleries/..)": "culture museum galleries",
     "Nature focused (Beach/Desert/Parks/...)": "nature beach desert parks",
@@ -43,10 +36,9 @@ ACTIVITY_KEYWORDS = {
 
 
 def build_restaurant_profile(req: VisitorProfileRequest) -> dict:
-    cuisines = list(req.cuisine_preferences)  
+    cuisines = list(req.cuisine_preferences)
     if req.cuisine_other:
         cuisines.append(req.cuisine_other)
-
     return {
         "city": req.city,
         "cuisines": cuisines,
@@ -56,25 +48,22 @@ def build_restaurant_profile(req: VisitorProfileRequest) -> dict:
 
 
 def build_event_profile(req: VisitorProfileRequest) -> dict:
-
     BUDGET_LEVELS = {
         "free": ["Free"],
         "low": ["Free", "Low"],
         "medium": ["Free", "Low", "Medium"],
         "high": ["Free", "Low", "Medium", "High"],
     }
-     
+
     budget = BUDGET_LEVELS.get(
         req.daily_attraction_budget.lower(),
         ["Free", "Low", "Medium", "High"],
     )
-
     environment = (
         [e.capitalize() for e in req.attraction_environment]
         or ["Indoor", "Outdoor", "Both"]
     )
-
-    trip_end = req.trip_end_date or req.trip_start_date  
+    trip_end = req.trip_end_date or req.trip_start_date
 
     return {
         "User_ID": req.user_id,
@@ -83,7 +72,8 @@ def build_event_profile(req: VisitorProfileRequest) -> dict:
         "City": req.city,
         "budget": budget,
         "Event_Preferences": req.event_preferences or None,
-        "Activity_Preferences": req.activity_preferences,   
+        "Activity_Preferences": req.activity_preferences,
+        "Activity_Other": req.activity_other or "",
         "Cuisine_Preferences": req.cuisine_preferences,
         "Cuisine_Other": req.cuisine_other or "",
         "Environment": environment,
@@ -96,17 +86,14 @@ def build_event_profile(req: VisitorProfileRequest) -> dict:
 
 
 def build_attraction_profile(req: VisitorProfileRequest) -> dict:
-    selected_activities = req.activity_preferences 
-
+    selected_activities = req.activity_preferences
     keywords = [
         ACTIVITY_KEYWORDS.get(label, label)
         for label in selected_activities
     ]
     if req.activity_other:
         keywords.append(req.activity_other)
-
-    environment = req.attraction_environment 
-
+    environment = req.attraction_environment
     return {
         "city": req.city,
         "attraction_preference": keywords,
@@ -115,3 +102,40 @@ def build_attraction_profile(req: VisitorProfileRequest) -> dict:
         "with_kids": "Yes" if req.traveling_with_kids else "No",
         "top_n": req.num_recommendations,
     }
+
+
+# --- Response schemas (yours) ---
+class EventRecommendation(BaseModel):
+    visitor_id: str
+    Name: str
+    Categories: list
+    Location: str
+    Start_Date: str
+    End_Date: str
+    Price_Range: str
+    similarity_score: float
+    fallback_stage: str
+    final_score: float
+    recommendation_reason: str
+    Description: str
+
+
+class RecommendationResponse(BaseModel):
+    visitor_id: str
+    num_results: int
+    recommendations: List[EventRecommendation]
+
+
+# --- Hearts / Reviews request schemas (yours) ---
+class HeartRequest(BaseModel):
+    user_id: str
+    listing_type: str
+    listing_id: str
+
+
+class ReviewRequest(BaseModel):
+    user_id: str
+    listing_type: str
+    listing_id: str
+    rating: int
+    comment: str

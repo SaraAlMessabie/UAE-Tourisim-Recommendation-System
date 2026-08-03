@@ -1,0 +1,25 @@
+# Backend
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+python-multipart==0.0.18
+
+# Data handling
+pandas==2.2.3
+numpy==1.26.4
+scipy==1.13.1
+
+# Recommendation engine
+scikit-learn==1.4.2
+joblib==1.4.2
+
+# Google Sheets
+gspread==6.1.4
+google-auth==2.37.0
+
+# Frontend
+streamlit==1.59.2
+requests==2.32.3
+
+# Helpers
+python-dateutil==2.9.0
