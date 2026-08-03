@@ -1,16 +1,34 @@
+import os
+import json
 import gspread
 import pandas as pd
+from google.oauth2.service_account import Credentials
 
-# Connects using the service account credentials — never commit credentials.json to GitHub
-gc = gspread.service_account(filename="credentials.json")
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
+
+def _get_gspread_client():
+    creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    if creds_json:
+        creds_dict = json.loads(creds_json)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        return gspread.authorize(creds)
+    else:
+        return gspread.service_account(filename="credentials.json")
+
+
+gc = _get_gspread_client()
 spreadsheet = gc.open("TouristAppData")
 
+
 def get_sheet(tab_name):
-    """Returns a live connection to one specific sheet tab (e.g. 'Hearts', 'Reviews')."""
     return spreadsheet.worksheet(tab_name)
 
+
 def get_sheet_as_df(tab_name):
-    """Pulls all rows from a sheet tab and returns them as a pandas DataFrame."""
     sheet = get_sheet(tab_name)
     records = sheet.get_all_records()
     return pd.DataFrame(records)
