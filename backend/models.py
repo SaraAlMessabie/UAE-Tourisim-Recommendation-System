@@ -147,7 +147,7 @@ class RecommendationResponse(BaseModel):
     recommendations: List[EventRecommendation]
 
 
-# --- Hearts / Reviews request schemas (yours) ---
+# --- Hearts / Reviews request schemas  ---
 class HeartRequest(BaseModel):
     user_id: str
     listing_type: str
