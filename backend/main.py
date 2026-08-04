@@ -299,7 +299,8 @@ def add_heart(heart: HeartRequest):
 
 @app.get("/hearts/{user_id}")
 def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Optional[str] = None):
-    validate_listing_exists(listing_type, listing_id)
+    if listing_type is not None and listing_id is not None:
+        validate_listing_exists(listing_type, listing_id)
     try:
         df = get_sheet_as_df("hearts")
         if df.empty:
