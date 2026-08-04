@@ -21,7 +21,7 @@ class VisitorProfileRequest(BaseModel):
     weather_preference: List[str] = []
     crowdedness_preference: Optional[str] = None
     traveling_with_kids: bool
-    num_recommendations: int = 5
+    num_recommendations: int = Field(default=5, gt=0, le=50)
 
     @field_validator("activity_other", "cuisine_other")
 
