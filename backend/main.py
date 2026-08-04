@@ -1,9 +1,11 @@
 import pickle
 import joblib
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+import os
 
 from catalogs import load_events_catalog, load_restaurants_catalog, load_attractions_catalog
 from models import (
@@ -22,21 +24,21 @@ from sentiment import predict_sentiment
 from sheets import get_sheet, get_sheet_as_df
 
 
-app = FastAPI(title="UAE Tourist Recommendation API")
+# ---------------------------------------------------------------------------
+# Resource container — replaces the old `global` variables from on_event
+# ---------------------------------------------------------------------------
+
+resources: dict = {}
 
 
 # ---------------------------------------------------------------------------
-# Startup: load every catalog + saved model artifact ONCE, not per-request
+# Lifespan: load every catalog + saved model artifact ONCE, not per-request
 # ---------------------------------------------------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODELS_DIR = os.path.join(BASE_DIR, "models and vectors")
 
-@app.on_event("startup")
-def load_resources():
-    global events_df, event_tfidf, event_vectors
-    global restaurants_df, restaurant_tfidf, restaurant_vectors
-    global attractions_df, attraction_tfidf, attraction_vectors
-    global sentiment_model, sentiment_vectorizer
-
-
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     # --- Static catalogs (from GitHub) ---
     events_df = load_events_catalog()
     events_df['Start_Date'] = pd.to_datetime(events_df['Start_Date'])
@@ -46,20 +48,41 @@ def load_resources():
     attractions_df = load_attractions_catalog()
 
     # --- Saved vectorizers / similarity matrices ---
-    with open("models and vectors/events_tfidf_vectorizer.pkl", "rb") as f:
-        event_tfidf = pickle.load(f)
-    with open("models and vectors/all_event_vectors.pkl", "rb") as f:
-        event_vectors = pickle.load(f)
+    event_tfidf = joblib.load(os.path.join(MODELS_DIR, "events_tfidf_vectorizer.pkl"))
+    event_vectors = joblib.load(os.path.join(MODELS_DIR, "all_event_vectors.pkl"))
 
-    restaurant_tfidf = joblib.load("models and vectors/restaurants_vectorizer.joblib")
-    restaurant_vectors = joblib.load("models and vectors/restaurants_matrix.joblib")
+    restaurant_tfidf = joblib.load(os.path.join(MODELS_DIR, "restaurants_vectorizer.joblib"))
+    restaurant_vectors = joblib.load(os.path.join(MODELS_DIR, "restaurants_matrix.joblib"))
 
-    attraction_tfidf = joblib.load("models and vectors/attractions_vectorizer.joblib")
-    attraction_vectors = joblib.load("models and vectors/attractions_matrix.joblib")
+    attraction_tfidf = joblib.load(os.path.join(MODELS_DIR, "attractions_vectorizer.joblib"))
+    attraction_vectors = joblib.load(os.path.join(MODELS_DIR, "attractions_matrix.joblib"))
 
-    sentiment_model = joblib.load("models and vectors/sentiment_model_best.joblib")
-    sentiment_vectorizer = joblib.load("models and vectors/sentiment_vectorizer.joblib")
+    sentiment_model = joblib.load(os.path.join(MODELS_DIR, "sentiment_model_best.joblib"))
+    sentiment_vectorizer = joblib.load(os.path.join(MODELS_DIR, "sentiment_vectorizer.joblib"))
+
+    resources.update({
+        "events_df": events_df,
+        "event_tfidf": event_tfidf,
+        "event_vectors": event_vectors,
+        "restaurants_df": restaurants_df,
+        "restaurant_tfidf": restaurant_tfidf,
+        "restaurant_vectors": restaurant_vectors,
+        "attractions_df": attractions_df,
+        "attraction_tfidf": attraction_tfidf,
+        "attraction_vectors": attraction_vectors,
+        "sentiment_model": sentiment_model,
+        "sentiment_vectorizer": sentiment_vectorizer,
+    })
+
     print("All resources loaded successfully.")
+
+    yield  # <-- app runs while suspended here
+
+    # --- Shutdown / cleanup (nothing needed today, but this is where it goes) ---
+    resources.clear()
+
+
+app = FastAPI(title="UAE Tourist Recommendation API", lifespan=lifespan)
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +121,12 @@ def log_recommendations(records, user_id, listing_type, id_field, name_field):
 def get_event_recommendations(request: VisitorProfileRequest):
     visitor_profile = build_event_profile(request)
 
-    result = recommend_events(events_df, visitor_profile, event_tfidf, event_vectors)
+    result = recommend_events(
+        resources["events_df"],
+        visitor_profile,
+        resources["event_tfidf"],
+        resources["event_vectors"],
+    )
 
     log_recommendations(
         result["recommendations"],
@@ -120,7 +148,12 @@ def get_event_recommendations(request: VisitorProfileRequest):
 def get_restaurant_recommendations(request: VisitorProfileRequest):
     visitor_profile = build_restaurant_profile(request)
 
-    result_df = recommend_restaurants(visitor_profile, restaurants_df, restaurant_tfidf, restaurant_vectors)
+    result_df = recommend_restaurants(
+        visitor_profile,
+        resources["restaurants_df"],
+        resources["restaurant_tfidf"],
+        resources["restaurant_vectors"],
+    )
 
     score_cols = [c for c in ['similarity_score', 'final_score'] if c in result_df.columns]
     if score_cols:
@@ -152,7 +185,10 @@ def get_attraction_recommendations(request: VisitorProfileRequest):
     visitor_profile = build_attraction_profile(request)
 
     result_df = recommend_attractions_with_sentiment(
-        visitor_profile, attractions_df, attraction_tfidf, attraction_vectors
+        visitor_profile,
+        resources["attractions_df"],
+        resources["attraction_tfidf"],
+        resources["attraction_vectors"],
     )
 
     score_cols = [c for c in ['similarity_score', 'final_score'] if c in result_df.columns]
@@ -211,7 +247,7 @@ def get_hearts(user_id: str):
 @app.post("/reviews")
 def add_review(review: ReviewRequest):
     try:
-        sentiment = predict_sentiment(review.comment)
+        sentiment = predict_sentiment(review.comment, resources["sentiment_model"])
         sheet = get_sheet("reviews")
         sheet.append_row([
             review.user_id, review.listing_type, review.listing_id,
@@ -221,7 +257,7 @@ def add_review(review: ReviewRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save review: {e}")
 
-
+    
 @app.get("/reviews/{listing_id}")
 def get_reviews(listing_id: str):
     try:

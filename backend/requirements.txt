@@ -8,9 +8,9 @@ python-multipart==0.0.18
 pandas==2.2.3
 numpy==1.26.4
 scipy==1.13.1
+os
 
 # Recommendation engine
-scikit-learn==1.4.2
 joblib==1.4.2
 
 # Google Sheets
