@@ -273,10 +273,12 @@ def add_heart(heart: HeartRequest):
         user_col = "User_ID" if "User_ID" in df.columns else "user_id"
         type_col = "Listing_Type" if "Listing_Type" in df.columns else "listing_type"
         id_col = "Listing_ID" if "Listing_ID" in df.columns else "listing_id"
+
+        df[user_col] = df[user_col].astype(str)  
         df[id_col] = df[id_col].astype(str)
 
         duplicate = df[
-            (df[user_col] == heart.user_id) &
+            (df[user_col] == str(heart.user_id)) &             
             (df[type_col].str.lower() == heart.listing_type.lower()) &
             (df[id_col] == str(heart.listing_id))
         ]
@@ -297,6 +299,7 @@ def add_heart(heart: HeartRequest):
 
 @app.get("/hearts/{user_id}")
 def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Optional[str] = None):
+    validate_listing_exists(listing_type, listing_id)
     try:
         df = get_sheet_as_df("hearts")
         if df.empty:
@@ -306,9 +309,10 @@ def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Opt
         type_col = "Listing_Type" if "Listing_Type" in df.columns else "listing_type"
         id_col = "Listing_ID" if "Listing_ID" in df.columns else "listing_id"
 
+        df[user_col] = df[user_col].astype(str)   # ← add this
         df[id_col] = df[id_col].astype(str)
 
-        user_hearts = df[df[user_col] == user_id]
+        user_hearts = df[df[user_col] == str(user_id)]   # ← cast comparison value
 
         if listing_type is not None:
             user_hearts = user_hearts[user_hearts[type_col].str.lower() == listing_type.lower()]
@@ -318,7 +322,7 @@ def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Opt
         return user_hearts.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch likes: {e}")
-
+    
 
 
 
@@ -346,6 +350,7 @@ def add_review(review: ReviewRequest):
 
 @app.get("/reviews/{listing_type}/{listing_id}")
 def get_reviews(listing_type: str, listing_id: str):
+    validate_listing_exists(listing_type, listing_id)
     try:
         df = get_sheet_as_df("reviews")
         if df.empty:
@@ -354,18 +359,16 @@ def get_reviews(listing_type: str, listing_id: str):
         id_col = "Listing_ID" if "Listing_ID" in df.columns else "listing_id"
         type_col = "Listing_Type" if "Listing_Type" in df.columns else "listing_type"
 
-        # Sheets read numbers as ints via get_all_records  compare as strings to be safe
-        df[id_col] = df[id_col].astype(str)
+        df[id_col] = df[id_col].astype(str).str.strip()
+        df[type_col] = df[type_col].astype(str).str.strip()
 
         listing_reviews = df[
-            (df[id_col] == str(listing_id)) &
-            (df[type_col].str.lower() == listing_type.lower())
+            (df[id_col] == str(listing_id).strip()) &
+            (df[type_col].str.lower() == listing_type.strip().lower())
         ]
         return listing_reviews.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch reviews: {e}")
-
-
 
 app.add_middleware(
     CORSMiddleware,
