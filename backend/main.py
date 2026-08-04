@@ -1,4 +1,3 @@
-import pickle
 import joblib
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -41,7 +40,6 @@ MODELS_DIR = os.path.join(BASE_DIR, "models and vectors")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- Static catalogs (from GitHub) ---
     events_df = load_events_catalog()
     events_df['Start_Date'] = pd.to_datetime(events_df['Start_Date'])
     events_df['End_Date'] = pd.to_datetime(events_df['End_Date'])
@@ -78,9 +76,8 @@ async def lifespan(app: FastAPI):
 
     print("All resources loaded successfully.")
 
-    yield  # <-- app runs while suspended here
+    yield
 
-    # --- Shutdown / cleanup (nothing needed today, but this is where it goes) ---
     resources.clear()
 
 
@@ -94,7 +91,7 @@ app = FastAPI(title="UAE Tourist Recommendation API", lifespan=lifespan)
 def log_recommendations(records, user_id, listing_type, id_field, name_field):
     """records: list of dicts (already-serialized recommendation rows)."""
     try:
-        sheet = get_sheet("Recommendation_Log")
+        sheet = get_sheet("recommendation_log")
         rows = []
         for row in records:
             listing_id = row.get(id_field) or row.get(name_field, "")
@@ -115,9 +112,6 @@ def log_recommendations(records, user_id, listing_type, id_field, name_field):
         print(f"Warning: failed to write Recommendation_Log: {e}")
 
 
-# ---------------------------------------------------------------------------
-# /recommend-events — uses your event_recommender (already returns JSON-ready dict)
-# ---------------------------------------------------------------------------
 
 @app.post("/recommend-events", response_model=RecommendationResponse)
 def get_event_recommendations(request: VisitorProfileRequest):
@@ -254,9 +248,7 @@ def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Opt
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch likes: {e}")
 
-# ---------------------------------------------------------------------------
-# Reviews — with sentiment prediction wired in at write-time
-# ---------------------------------------------------------------------------
+
 @app.post("/reviews")
 def add_review(review: ReviewRequest):
     try:
