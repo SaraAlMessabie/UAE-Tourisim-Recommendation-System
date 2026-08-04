@@ -1,0 +1,31 @@
+{
+  "endpoint": "POST /recommend-restaurants",
+  "request": {
+    "user_id": "demo_user",
+    "trip_start_date": "2026-10-01",
+    "trip_end_date": "2026-10-10",
+    "city": ["Abu Dhabi"],
+    "daily_food_budget": "Medium",
+    "daily_attraction_budget": "Medium",
+    "activity_preferences": [
+      "Culture focused (Museum/Galleries/..)"
+    ],
+    "cuisine_preferences": ["Italian"],
+    "attraction_environment": ["indoor"],
+    "traveling_with_kids": false,
+    "num_recommendations": 5
+  },
+  "response_shape": {
+    "visitor_id": "demo_user",
+    "num_results": 5,
+    "recommendations": [
+      {
+        "restaurant_name": "string",
+        "city": "string",
+        "cuisines": "string",
+        "final_score": 0.0,
+        "fallback_stage": "strict_match"
+      }
+    ]
+  }
+}
