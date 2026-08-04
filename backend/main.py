@@ -4,6 +4,8 @@ from datetime import datetime
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
 import os
 import uuid
 from typing import Optional
@@ -31,6 +33,12 @@ from sheets import get_sheet, get_sheet_as_df
 
 resources: dict = {}
 
+# mapping for verification
+LISTING_CATALOG_LOOKUP = {
+    "event": ("events_df", "Event_ID"),
+    "restaurant": ("restaurants_df", "restaurant_id"),
+    "attraction": ("attractions_df", "attraction_id"),
+}
 
 # ---------------------------------------------------------------------------
 # Lifespan: load every catalog + saved model artifact ONCE, not per-request
@@ -83,7 +91,50 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="UAE Tourist Recommendation API", lifespan=lifespan)
 
+#checks if the listing is real
+def validate_listing_exists(listing_type: str, listing_id: str) -> str:
+    listing_type_key = (listing_type or "").strip().lower()
 
+    df_key, id_col = LISTING_CATALOG_LOOKUP[listing_type_key]
+    catalog_df = resources.get(df_key)
+
+    if catalog_df is not None and id_col in catalog_df.columns:
+        valid_ids = catalog_df[id_col].astype(str).values
+        if str(listing_id) not in valid_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{listing_type} with ID {listing_id} does not exist.",
+            )
+
+    return listing_type_key
+
+#checks it writes back to google sheet
+def append_row_safe(sheet, row: list, context: str = "row"):
+    try:
+        result = sheet.append_row(row)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write {context} to Google Sheets: {e}")
+
+    updates = result.get("updates", {}) if isinstance(result, dict) else {}
+    updated_rows = updates.get("updatedRows")
+
+    if updated_rows != 1:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Google Sheets write for {context} did not confirm success (response: {result})",
+        )
+
+    return result
+
+
+#checks if trip date is in range
+def validate_trip_dates(request: VisitorProfileRequest):
+    if request.trip_end_date < request.trip_start_date:
+        raise HTTPException(
+            status_code=400,
+            detail="trip_end_date cannot be before trip_start_date.",
+        )
+    
 # ---------------------------------------------------------------------------
 # Shared helper: log every recommendation shown, regardless of listing type
 # ---------------------------------------------------------------------------
@@ -115,6 +166,7 @@ def log_recommendations(records, user_id, listing_type, id_field, name_field):
 
 @app.post("/recommend-events", response_model=RecommendationResponse)
 def get_event_recommendations(request: VisitorProfileRequest):
+    validate_trip_dates(request)
     visitor_profile = build_event_profile(request)
 
     result = recommend_events(
@@ -214,18 +266,41 @@ def get_attraction_recommendations(request: VisitorProfileRequest):
 
 @app.post("/hearts")
 def add_heart(heart: HeartRequest):
-    try:
-        heart_id = f"H-{uuid.uuid4().hex[:8]}"
-        sheet = get_sheet("hearts")
-        sheet.append_row([
-            heart_id, heart.user_id, heart.listing_type, heart.listing_id, str(datetime.now())
-        ])
-        return {"status": "saved", "heart_id": heart_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save like: {e}")
+    validate_listing_exists(heart.listing_type, heart.listing_id)
+
+    df = get_sheet_as_df("hearts")
+    if not df.empty:
+        user_col = "User_ID" if "User_ID" in df.columns else "user_id"
+        type_col = "Listing_Type" if "Listing_Type" in df.columns else "listing_type"
+        id_col = "Listing_ID" if "Listing_ID" in df.columns else "listing_id"
+
+        df[user_col] = df[user_col].astype(str)  
+        df[id_col] = df[id_col].astype(str)
+
+        duplicate = df[
+            (df[user_col] == str(heart.user_id)) &             
+            (df[type_col].str.lower() == heart.listing_type.lower()) &
+            (df[id_col] == str(heart.listing_id))
+        ]
+        if not duplicate.empty:
+            raise HTTPException(status_code=409, detail="This listing is already hearted by this user.")
+
+    heart_id = f"H-{uuid.uuid4().hex[:8]}"
+    sheet = get_sheet("hearts")
+
+    append_row_safe(
+        sheet,
+        [heart_id, heart.user_id, heart.listing_type, heart.listing_id, str(datetime.now())],
+        context="heart",
+    )
+
+    return {"status": "saved", "heart_id": heart_id}
+
 
 @app.get("/hearts/{user_id}")
 def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Optional[str] = None):
+    if listing_type is not None and listing_id is not None:
+        validate_listing_exists(listing_type, listing_id)
     try:
         df = get_sheet_as_df("hearts")
         if df.empty:
@@ -235,9 +310,10 @@ def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Opt
         type_col = "Listing_Type" if "Listing_Type" in df.columns else "listing_type"
         id_col = "Listing_ID" if "Listing_ID" in df.columns else "listing_id"
 
+        df[user_col] = df[user_col].astype(str)   # ← add this
         df[id_col] = df[id_col].astype(str)
 
-        user_hearts = df[df[user_col] == user_id]
+        user_hearts = df[df[user_col] == str(user_id)]   # ← cast comparison value
 
         if listing_type is not None:
             user_hearts = user_hearts[user_hearts[type_col].str.lower() == listing_type.lower()]
@@ -247,25 +323,35 @@ def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Opt
         return user_hearts.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch likes: {e}")
+    
+
 
 
 @app.post("/reviews")
 def add_review(review: ReviewRequest):
-    try:
-        sentiment = predict_sentiment(review.comment, resources["sentiment_model"])
-        review_id = f"R-{uuid.uuid4().hex[:8]}"
-        sheet = get_sheet("reviews")
-        sheet.append_row([
-            review_id, review.user_id, review.listing_type, review.listing_id,
-            review.rating, review.comment, sentiment, str(datetime.now())
-        ])
-        return {"status": "saved", "review_id": review_id, "sentiment": sentiment}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save review: {e}")
+    comment = review.comment.strip() if review.comment else ""
+    if not comment:
+        raise HTTPException(status_code=400, detail="Comment cannot be empty.")
+
+    validate_listing_exists(review.listing_type, review.listing_id)
+
+    sentiment = predict_sentiment(comment, resources["sentiment_model"])
+    review_id = f"R-{uuid.uuid4().hex[:8]}"
+    sheet = get_sheet("reviews")
+
+    append_row_safe(
+        sheet,
+        [review_id, review.user_id, review.listing_type, review.listing_id,
+         review.rating, comment, sentiment, str(datetime.now())],
+        context="review",
+    )
+
+    return {"status": "saved", "review_id": review_id, "sentiment": sentiment}
     
-    
+
 @app.get("/reviews/{listing_type}/{listing_id}")
 def get_reviews(listing_type: str, listing_id: str):
+    validate_listing_exists(listing_type, listing_id)
     try:
         df = get_sheet_as_df("reviews")
         if df.empty:
@@ -274,13 +360,21 @@ def get_reviews(listing_type: str, listing_id: str):
         id_col = "Listing_ID" if "Listing_ID" in df.columns else "listing_id"
         type_col = "Listing_Type" if "Listing_Type" in df.columns else "listing_type"
 
-        # Sheets read numbers as ints via get_all_records — compare as strings to be safe
-        df[id_col] = df[id_col].astype(str)
+        df[id_col] = df[id_col].astype(str).str.strip()
+        df[type_col] = df[type_col].astype(str).str.strip()
 
         listing_reviews = df[
-            (df[id_col] == str(listing_id)) &
-            (df[type_col].str.lower() == listing_type.lower())
+            (df[id_col] == str(listing_id).strip()) &
+            (df[type_col].str.lower() == listing_type.strip().lower())
         ]
         return listing_reviews.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch reviews: {e}")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
