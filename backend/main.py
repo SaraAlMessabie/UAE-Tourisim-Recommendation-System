@@ -1,9 +1,12 @@
-import pickle
 import joblib
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+import os
+import uuid
+from typing import Optional
 
 from catalogs import load_events_catalog, load_restaurants_catalog, load_attractions_catalog
 from models import (
@@ -22,22 +25,21 @@ from sentiment import predict_sentiment
 from sheets import get_sheet, get_sheet_as_df
 
 
-app = FastAPI(title="UAE Tourist Recommendation API")
+# ---------------------------------------------------------------------------
+# Resource container — replaces the old `global` variables from on_event
+# ---------------------------------------------------------------------------
+
+resources: dict = {}
 
 
 # ---------------------------------------------------------------------------
-# Startup: load every catalog + saved model artifact ONCE, not per-request
+# Lifespan: load every catalog + saved model artifact ONCE, not per-request
 # ---------------------------------------------------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODELS_DIR = os.path.join(BASE_DIR, "models and vectors")
 
-@app.on_event("startup")
-def load_resources():
-    global events_df, event_tfidf, event_vectors
-    global restaurants_df, restaurant_tfidf, restaurant_vectors
-    global attractions_df, attraction_tfidf, attraction_vectors
-    global sentiment_model, sentiment_vectorizer
-
-
-    # --- Static catalogs (from GitHub) ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     events_df = load_events_catalog()
     events_df['Start_Date'] = pd.to_datetime(events_df['Start_Date'])
     events_df['End_Date'] = pd.to_datetime(events_df['End_Date'])
@@ -46,20 +48,40 @@ def load_resources():
     attractions_df = load_attractions_catalog()
 
     # --- Saved vectorizers / similarity matrices ---
-    with open("models and vectors/events_tfidf_vectorizer.pkl", "rb") as f:
-        event_tfidf = pickle.load(f)
-    with open("models and vectors/all_event_vectors.pkl", "rb") as f:
-        event_vectors = pickle.load(f)
+    event_tfidf = joblib.load(os.path.join(MODELS_DIR, "events_tfidf_vectorizer.pkl"))
+    event_vectors = joblib.load(os.path.join(MODELS_DIR, "all_event_vectors.pkl"))
 
-    restaurant_tfidf = joblib.load("models and vectors/restaurants_vectorizer.joblib")
-    restaurant_vectors = joblib.load("models and vectors/restaurants_matrix.joblib")
+    restaurant_tfidf = joblib.load(os.path.join(MODELS_DIR, "restaurants_vectorizer.joblib"))
+    restaurant_vectors = joblib.load(os.path.join(MODELS_DIR, "restaurants_matrix.joblib"))
 
-    attraction_tfidf = joblib.load("models and vectors/attractions_vectorizer.joblib")
-    attraction_vectors = joblib.load("models and vectors/attractions_matrix.joblib")
+    attraction_tfidf = joblib.load(os.path.join(MODELS_DIR, "attractions_vectorizer.joblib"))
+    attraction_vectors = joblib.load(os.path.join(MODELS_DIR, "attractions_matrix.joblib"))
 
-    sentiment_model = joblib.load("models and vectors/sentiment_model_best.joblib")
-    sentiment_vectorizer = joblib.load("models and vectors/sentiment_vectorizer.joblib")
+    sentiment_model = joblib.load(os.path.join(MODELS_DIR, "sentiment_model_best.joblib"))
+    sentiment_vectorizer = joblib.load(os.path.join(MODELS_DIR, "sentiment_vectorizer.joblib"))
+
+    resources.update({
+        "events_df": events_df,
+        "event_tfidf": event_tfidf,
+        "event_vectors": event_vectors,
+        "restaurants_df": restaurants_df,
+        "restaurant_tfidf": restaurant_tfidf,
+        "restaurant_vectors": restaurant_vectors,
+        "attractions_df": attractions_df,
+        "attraction_tfidf": attraction_tfidf,
+        "attraction_vectors": attraction_vectors,
+        "sentiment_model": sentiment_model,
+        "sentiment_vectorizer": sentiment_vectorizer,
+    })
+
     print("All resources loaded successfully.")
+
+    yield
+
+    resources.clear()
+
+
+app = FastAPI(title="UAE Tourist Recommendation API", lifespan=lifespan)
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +91,7 @@ def load_resources():
 def log_recommendations(records, user_id, listing_type, id_field, name_field):
     """records: list of dicts (already-serialized recommendation rows)."""
     try:
-        sheet = get_sheet("Recommendation_Log")
+        sheet = get_sheet("recommendation_log")
         rows = []
         for row in records:
             listing_id = row.get(id_field) or row.get(name_field, "")
@@ -90,15 +112,17 @@ def log_recommendations(records, user_id, listing_type, id_field, name_field):
         print(f"Warning: failed to write Recommendation_Log: {e}")
 
 
-# ---------------------------------------------------------------------------
-# /recommend-events — uses your event_recommender (already returns JSON-ready dict)
-# ---------------------------------------------------------------------------
 
 @app.post("/recommend-events", response_model=RecommendationResponse)
 def get_event_recommendations(request: VisitorProfileRequest):
     visitor_profile = build_event_profile(request)
 
-    result = recommend_events(events_df, visitor_profile, event_tfidf, event_vectors)
+    result = recommend_events(
+        resources["events_df"],
+        visitor_profile,
+        resources["event_tfidf"],
+        resources["event_vectors"],
+    )
 
     log_recommendations(
         result["recommendations"],
@@ -120,7 +144,12 @@ def get_event_recommendations(request: VisitorProfileRequest):
 def get_restaurant_recommendations(request: VisitorProfileRequest):
     visitor_profile = build_restaurant_profile(request)
 
-    result_df = recommend_restaurants(visitor_profile, restaurants_df, restaurant_tfidf, restaurant_vectors)
+    result_df = recommend_restaurants(
+        visitor_profile,
+        resources["restaurants_df"],
+        resources["restaurant_tfidf"],
+        resources["restaurant_vectors"],
+    )
 
     score_cols = [c for c in ['similarity_score', 'final_score'] if c in result_df.columns]
     if score_cols:
@@ -152,7 +181,10 @@ def get_attraction_recommendations(request: VisitorProfileRequest):
     visitor_profile = build_attraction_profile(request)
 
     result_df = recommend_attractions_with_sentiment(
-        visitor_profile, attractions_df, attraction_tfidf, attraction_vectors
+        visitor_profile,
+        resources["attractions_df"],
+        resources["attraction_tfidf"],
+        resources["attraction_vectors"],
     )
 
     score_cols = [c for c in ['similarity_score', 'final_score'] if c in result_df.columns]
@@ -183,52 +215,72 @@ def get_attraction_recommendations(request: VisitorProfileRequest):
 @app.post("/hearts")
 def add_heart(heart: HeartRequest):
     try:
+        heart_id = f"H-{uuid.uuid4().hex[:8]}"
         sheet = get_sheet("hearts")
         sheet.append_row([
-            heart.user_id, heart.listing_type, heart.listing_id, str(datetime.now())
+            heart_id, heart.user_id, heart.listing_type, heart.listing_id, str(datetime.now())
         ])
-        return {"status": "saved"}
+        return {"status": "saved", "heart_id": heart_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save like: {e}")
 
-
 @app.get("/hearts/{user_id}")
-def get_hearts(user_id: str):
+def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Optional[str] = None):
     try:
         df = get_sheet_as_df("hearts")
         if df.empty:
             return []
-        user_hearts = df[df["User_ID"] == user_id] if "User_ID" in df.columns else df[df["user_id"] == user_id]
+
+        user_col = "User_ID" if "User_ID" in df.columns else "user_id"
+        type_col = "Listing_Type" if "Listing_Type" in df.columns else "listing_type"
+        id_col = "Listing_ID" if "Listing_ID" in df.columns else "listing_id"
+
+        df[id_col] = df[id_col].astype(str)
+
+        user_hearts = df[df[user_col] == user_id]
+
+        if listing_type is not None:
+            user_hearts = user_hearts[user_hearts[type_col].str.lower() == listing_type.lower()]
+        if listing_id is not None:
+            user_hearts = user_hearts[user_hearts[id_col] == str(listing_id)]
+
         return user_hearts.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch likes: {e}")
 
 
-# ---------------------------------------------------------------------------
-# Reviews — with sentiment prediction wired in at write-time
-# ---------------------------------------------------------------------------
-
 @app.post("/reviews")
 def add_review(review: ReviewRequest):
     try:
-        sentiment = predict_sentiment(review.comment)
+        sentiment = predict_sentiment(review.comment, resources["sentiment_model"])
+        review_id = f"R-{uuid.uuid4().hex[:8]}"
         sheet = get_sheet("reviews")
         sheet.append_row([
-            review.user_id, review.listing_type, review.listing_id,
+            review_id, review.user_id, review.listing_type, review.listing_id,
             review.rating, review.comment, sentiment, str(datetime.now())
         ])
-        return {"status": "saved", "sentiment": sentiment}
+        return {"status": "saved", "review_id": review_id, "sentiment": sentiment}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save review: {e}")
-
-
-@app.get("/reviews/{listing_id}")
-def get_reviews(listing_id: str):
+    
+    
+@app.get("/reviews/{listing_type}/{listing_id}")
+def get_reviews(listing_type: str, listing_id: str):
     try:
         df = get_sheet_as_df("reviews")
         if df.empty:
             return []
-        listing_reviews = df[df["Listing_ID"] == listing_id] if "Listing_ID" in df.columns else df[df["listing_id"] == listing_id]
+
+        id_col = "Listing_ID" if "Listing_ID" in df.columns else "listing_id"
+        type_col = "Listing_Type" if "Listing_Type" in df.columns else "listing_type"
+
+        # Sheets read numbers as ints via get_all_records — compare as strings to be safe
+        df[id_col] = df[id_col].astype(str)
+
+        listing_reviews = df[
+            (df[id_col] == str(listing_id)) &
+            (df[type_col].str.lower() == listing_type.lower())
+        ]
         return listing_reviews.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch reviews: {e}")

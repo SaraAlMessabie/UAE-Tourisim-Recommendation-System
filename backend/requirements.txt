@@ -10,8 +10,8 @@ numpy==1.26.4
 scipy==1.13.1
 
 # Recommendation engine
-scikit-learn==1.4.2
 joblib==1.4.2
+scikit-learn==1.8.0
 
 # Google Sheets
 gspread==6.1.4
