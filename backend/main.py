@@ -6,6 +6,8 @@ from datetime import datetime
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 import os
+import uuid
+from typing import Optional
 
 from catalogs import load_events_catalog, load_restaurants_catalog, load_attractions_catalog
 from models import (
@@ -219,52 +221,74 @@ def get_attraction_recommendations(request: VisitorProfileRequest):
 @app.post("/hearts")
 def add_heart(heart: HeartRequest):
     try:
+        heart_id = f"H-{uuid.uuid4().hex[:8]}"
         sheet = get_sheet("hearts")
         sheet.append_row([
-            heart.user_id, heart.listing_type, heart.listing_id, str(datetime.now())
+            heart_id, heart.user_id, heart.listing_type, heart.listing_id, str(datetime.now())
         ])
-        return {"status": "saved"}
+        return {"status": "saved", "heart_id": heart_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save like: {e}")
 
-
 @app.get("/hearts/{user_id}")
-def get_hearts(user_id: str):
+def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Optional[str] = None):
     try:
         df = get_sheet_as_df("hearts")
         if df.empty:
             return []
-        user_hearts = df[df["User_ID"] == user_id] if "User_ID" in df.columns else df[df["user_id"] == user_id]
+
+        user_col = "User_ID" if "User_ID" in df.columns else "user_id"
+        type_col = "Listing_Type" if "Listing_Type" in df.columns else "listing_type"
+        id_col = "Listing_ID" if "Listing_ID" in df.columns else "listing_id"
+
+        df[id_col] = df[id_col].astype(str)
+
+        user_hearts = df[df[user_col] == user_id]
+
+        if listing_type is not None:
+            user_hearts = user_hearts[user_hearts[type_col].str.lower() == listing_type.lower()]
+        if listing_id is not None:
+            user_hearts = user_hearts[user_hearts[id_col] == str(listing_id)]
+
         return user_hearts.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch likes: {e}")
 
-
 # ---------------------------------------------------------------------------
 # Reviews — with sentiment prediction wired in at write-time
 # ---------------------------------------------------------------------------
-
 @app.post("/reviews")
 def add_review(review: ReviewRequest):
     try:
         sentiment = predict_sentiment(review.comment, resources["sentiment_model"])
+        review_id = f"R-{uuid.uuid4().hex[:8]}"
         sheet = get_sheet("reviews")
         sheet.append_row([
-            review.user_id, review.listing_type, review.listing_id,
+            review_id, review.user_id, review.listing_type, review.listing_id,
             review.rating, review.comment, sentiment, str(datetime.now())
         ])
-        return {"status": "saved", "sentiment": sentiment}
+        return {"status": "saved", "review_id": review_id, "sentiment": sentiment}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save review: {e}")
-
     
-@app.get("/reviews/{listing_id}")
-def get_reviews(listing_id: str):
+    
+@app.get("/reviews/{listing_type}/{listing_id}")
+def get_reviews(listing_type: str, listing_id: str):
     try:
         df = get_sheet_as_df("reviews")
         if df.empty:
             return []
-        listing_reviews = df[df["Listing_ID"] == listing_id] if "Listing_ID" in df.columns else df[df["listing_id"] == listing_id]
+
+        id_col = "Listing_ID" if "Listing_ID" in df.columns else "listing_id"
+        type_col = "Listing_Type" if "Listing_Type" in df.columns else "listing_type"
+
+        # Sheets read numbers as ints via get_all_records — compare as strings to be safe
+        df[id_col] = df[id_col].astype(str)
+
+        listing_reviews = df[
+            (df[id_col] == str(listing_id)) &
+            (df[type_col].str.lower() == listing_type.lower())
+        ]
         return listing_reviews.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch reviews: {e}")
