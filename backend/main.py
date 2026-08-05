@@ -122,6 +122,29 @@ def validate_trip_dates(request: VisitorProfileRequest):
             status_code=400,
             detail="trip_end_date cannot be before trip_start_date.",
         )
+
+
+import time
+
+_sheet_cache: dict = {}
+CACHE_TTL_SECONDS = 15  # how long a cached read stays valid before refetching
+
+
+def get_sheet_as_df_cached(tab_name: str):
+    now = time.time()
+    cached = _sheet_cache.get(tab_name)
+
+    if cached and (now - cached["time"] < CACHE_TTL_SECONDS):
+        return cached["df"].copy()  # .copy() so callers mutating the df don't corrupt the cache
+
+    df = get_sheet_as_df(tab_name)
+    _sheet_cache[tab_name] = {"df": df, "time": now}
+    return df.copy()
+
+
+def invalidate_sheet_cache(tab_name: str):
+    """Call this after a write to that tab, so the next read reflects the change immediately."""
+    _sheet_cache.pop(tab_name, None)
     
 # ---------------------------------------------------------------------------
 # Shared helper: log every recommendation shown, regardless of listing type
@@ -134,18 +157,21 @@ def log_recommendations(records, user_id, listing_type, id_field, name_field):
         rows = []
         for row in records:
             listing_id = row.get(id_field) or row.get(name_field, "")
+            log_id = f"L-{uuid.uuid4().hex[:8]}"
             rows.append([
+                log_id,
                 user_id,
                 listing_type,
                 listing_id,
                 row.get("fallback_stage", ""),
-                row.get("similarity_score", ""),
                 row.get("final_score", ""),
+                row.get("similarity_score", ""),
                 row.get("rank", ""),
                 str(datetime.now()),
             ])
         if rows:
             sheet.append_rows(rows)
+            invalidate_sheet_cache("recommendation_log")
     except Exception as e:
         # Logging should never break a recommendation response
         print(f"Warning: failed to write Recommendation_Log: {e}")
@@ -256,17 +282,17 @@ def get_attraction_recommendations(request: VisitorProfileRequest):
 def add_heart(heart: HeartRequest):
     validate_listing_exists(heart.listing_type, heart.listing_id)
 
-    df = get_sheet_as_df("hearts")
+    df = get_sheet_as_df_cached("hearts")   # ← cached read
     if not df.empty:
         user_col = "User_ID" if "User_ID" in df.columns else "user_id"
         type_col = "Listing_Type" if "Listing_Type" in df.columns else "listing_type"
         id_col = "Listing_ID" if "Listing_ID" in df.columns else "listing_id"
 
-        df[user_col] = df[user_col].astype(str)  
+        df[user_col] = df[user_col].astype(str)
         df[id_col] = df[id_col].astype(str)
 
         duplicate = df[
-            (df[user_col] == str(heart.user_id)) &             
+            (df[user_col] == str(heart.user_id)) &
             (df[type_col].str.lower() == heart.listing_type.lower()) &
             (df[id_col] == str(heart.listing_id))
         ]
@@ -281,6 +307,7 @@ def add_heart(heart: HeartRequest):
         [heart_id, heart.user_id, heart.listing_type, heart.listing_id, str(datetime.now())],
         context="heart",
     )
+    invalidate_sheet_cache("hearts")   # ← so the new heart shows up immediately, not after 15s
 
     return {"status": "saved", "heart_id": heart_id}
 
@@ -290,7 +317,7 @@ def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Opt
     if listing_type is not None and listing_id is not None:
         validate_listing_exists(listing_type, listing_id)
     try:
-        df = get_sheet_as_df("hearts")
+        df = get_sheet_as_df_cached("hearts")   # ← cached read
         if df.empty:
             return []
 
@@ -298,10 +325,10 @@ def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Opt
         type_col = "Listing_Type" if "Listing_Type" in df.columns else "listing_type"
         id_col = "Listing_ID" if "Listing_ID" in df.columns else "listing_id"
 
-        df[user_col] = df[user_col].astype(str)  
+        df[user_col] = df[user_col].astype(str)
         df[id_col] = df[id_col].astype(str)
 
-        user_hearts = df[df[user_col] == str(user_id)]  
+        user_hearts = df[df[user_col] == str(user_id)]
 
         if listing_type is not None:
             user_hearts = user_hearts[user_hearts[type_col].str.lower() == listing_type.lower()]
@@ -311,8 +338,6 @@ def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Opt
         return user_hearts.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch likes: {e}")
-    
-
 
 
 @app.post("/reviews")
@@ -333,15 +358,16 @@ def add_review(review: ReviewRequest):
          review.rating, comment, sentiment, str(datetime.now())],
         context="review",
     )
+    invalidate_sheet_cache("reviews")   # ← so this review shows up immediately
 
     return {"status": "saved", "review_id": review_id, "sentiment": sentiment}
-    
+
 
 @app.get("/reviews/{listing_type}/{listing_id}")
 def get_reviews(listing_type: str, listing_id: str):
     validate_listing_exists(listing_type, listing_id)
     try:
-        df = get_sheet_as_df("reviews")
+        df = get_sheet_as_df_cached("reviews")   # ← cached read
         if df.empty:
             return []
 
@@ -358,6 +384,7 @@ def get_reviews(listing_type: str, listing_id: str):
         return listing_reviews.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch reviews: {e}")
+    
 
 @app.get("/browse/{listing_type}")
 def browse_listings(listing_type: str, limit: Optional[int] = None):
