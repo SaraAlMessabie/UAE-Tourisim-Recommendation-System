@@ -342,8 +342,11 @@ def render_quiz_page():
         with col2:
             trip_end_date = st.date_input("Trip end date", value=date.today())
 
-        city = st.multiselect("Which cities?", ["Dubai", "Abu Dhabi"], default=["Dubai"])
-
+        city = st.multiselect(
+            "Which cities?",
+            ["Dubai", "Abu Dhabi", "Sharjah", "Ras Al Khaimah"],
+            default=["Dubai"],
+        )
         col3, col4 = st.columns(2)
         with col3:
             daily_food_budget = st.select_slider(
@@ -356,21 +359,26 @@ def render_quiz_page():
 
         activity_preferences = st.multiselect(
             "Activity preferences",
-            ["Festival", "Cultural", "Sports", "Entertainment", "Exhibition", "Concert"],
+            [
+                "Culture focused (Museum/Galleries/..)",
+                "Nature focused (Beach/Desert/Parks/...)",
+                "Shopping (Malls/Exhibitions/...)",
+                "Adventure (Kayaking/ Desert Driving/ ...)",
+                "Kids Friendly",
+            ],
         )
         activity_other = st.text_input("Other activities (optional)")
 
         cuisine_preferences = st.multiselect(
             "Cuisine preferences",
-            ["Emirati", "International", "Italian", "Indian", "Japanese", "Middle Eastern"],
+            ["Emirati", "Indian", "Italian", "American", "Lebanese", "Greek"],
         )
         cuisine_other = st.text_input("Other cuisines (optional)")
 
         event_preferences = st.multiselect(
             "Event preferences",
-            ["Entertainment", "Exhibition", "Concert", "Sports", "Cultural", "Festival"],
+            ["Festival", "Entertainment", "Cultural", "Exhibition", "Sports", "Concert"],
         )
-
         attraction_environment = st.multiselect(
             "Preferred environment", ["Indoor", "Outdoor", "Both"]
         )
