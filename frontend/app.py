@@ -279,7 +279,6 @@ def render_quiz_page():
             "event_preferences": event_preferences,
             "attraction_environment": attraction_environment,
             "weather_preference": weather_preference,
-            "crowdedness_preference": crowdedness_preference,
             "traveling_with_kids": traveling_with_kids,
             "num_recommendations": num_recommendations,
             "additional_notes": additional_notes,
