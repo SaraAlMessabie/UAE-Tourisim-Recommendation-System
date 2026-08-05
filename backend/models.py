@@ -161,3 +161,6 @@ class ReviewRequest(BaseModel):
     listing_id: str
     rating: int
     comment: str
+
+class UserEmailRequest(BaseModel):
+    email: str

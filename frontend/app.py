@@ -66,14 +66,8 @@ def api_get(path: str, params: dict = None):
 
 
 def load_user_hearts(user_id: str):
-    """
-    Fetches every heart this user has ever saved (across all listing types)
-    and populates hearted_ids, so cards correctly show 'Hearted' state as
-    soon as they're rendered — not just for hearts made in this session.
-    """
     data, error = api_get(f"/hearts/{user_id}")
     if error:
-        # Non-fatal — just means heart buttons won't pre-fill; the app still works.
         st.session_state.hearted_ids = set()
         return
 
@@ -88,11 +82,6 @@ def load_user_hearts(user_id: str):
 
 
 def register_user(email: str):
-    """
-    Logs this email in the Users sheet (create-if-new). Non-fatal on
-    failure — the app's actual identity model still just uses the email
-    string as user_id everywhere else, this is purely a registry log.
-    """
     result, error = api_post("/users", {"email": email})
     if error:
         st.warning(f"Could not register user (non-critical): {error}")
@@ -253,7 +242,6 @@ def render_listing_card(listing: dict, listing_type: str, index: int = 0):
                         st.session_state.hearted_ids.add((listing_type, str(listing_id)))
                         st.rerun()
 
-        # --- Review section (expandable so cards stay compact) ---
         with st.expander("Reviews"):
             existing, error = api_get(f"/reviews/{listing_type}/{listing_id}")
             if error:
@@ -293,9 +281,6 @@ def render_listing_card(listing: dict, listing_type: str, index: int = 0):
                             st.rerun()
 
 
-# ---------------------------------------------------------------------------
-# Page: Landing
-# ---------------------------------------------------------------------------
 
 def render_landing_page():
     st.title("UAE Tourist Recommendation System")
