@@ -55,7 +55,6 @@ async def lifespan(app: FastAPI):
     restaurants_df = load_restaurants_catalog()
     attractions_df = load_attractions_catalog()
 
-    # --- Saved vectorizers / similarity matrices ---
     event_tfidf = joblib.load(os.path.join(MODELS_DIR, "events_tfidf_vectorizer.pkl"))
     event_vectors = joblib.load(os.path.join(MODELS_DIR, "all_event_vectors.pkl"))
 
@@ -82,7 +81,6 @@ async def lifespan(app: FastAPI):
         "sentiment_vectorizer": sentiment_vectorizer,
     })
 
-    print("All resources loaded successfully.")
 
     yield
 
@@ -114,17 +112,6 @@ def append_row_safe(sheet, row: list, context: str = "row"):
         result = sheet.append_row(row)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to write {context} to Google Sheets: {e}")
-
-    updates = result.get("updates", {}) if isinstance(result, dict) else {}
-    updated_rows = updates.get("updatedRows")
-
-    if updated_rows != 1:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Google Sheets write for {context} did not confirm success (response: {result})",
-        )
-
-    return result
 
 
 #checks if trip date is in range
@@ -310,10 +297,10 @@ def get_hearts(user_id: str, listing_type: Optional[str] = None, listing_id: Opt
         type_col = "Listing_Type" if "Listing_Type" in df.columns else "listing_type"
         id_col = "Listing_ID" if "Listing_ID" in df.columns else "listing_id"
 
-        df[user_col] = df[user_col].astype(str)   # ← add this
+        df[user_col] = df[user_col].astype(str)  
         df[id_col] = df[id_col].astype(str)
 
-        user_hearts = df[df[user_col] == str(user_id)]   # ← cast comparison value
+        user_hearts = df[df[user_col] == str(user_id)]  
 
         if listing_type is not None:
             user_hearts = user_hearts[user_hearts[type_col].str.lower() == listing_type.lower()]
@@ -370,6 +357,36 @@ def get_reviews(listing_type: str, listing_id: str):
         return listing_reviews.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch reviews: {e}")
+
+@app.get("/browse/{listing_type}")
+def browse_listings(listing_type: str, limit: Optional[int] = None):
+    """
+    Returns the full, unfiltered catalog for a listing type.
+    No quiz/profile matching — just the raw table, for users who skip the quiz.
+    """
+    listing_type_key = (listing_type or "").strip().lower()
+
+    lookup = LISTING_CATALOG_LOOKUP.get(listing_type_key)
+    if lookup is None:
+        raise HTTPException(status_code=400, detail=f"Unknown listing_type: {listing_type}")
+
+    df_key, _ = lookup
+    catalog_df = resources.get(df_key)
+
+    if catalog_df is None:
+        raise HTTPException(status_code=500, detail=f"{listing_type} catalog is not loaded.")
+
+    df = catalog_df.copy()
+    if limit is not None:
+        df = df.head(limit)
+
+    records = df.to_dict(orient="records")
+
+    return {
+        "listing_type": listing_type_key,
+        "num_results": len(records),
+        "recommendations": records,
+    }
 
 app.add_middleware(
     CORSMiddleware,
