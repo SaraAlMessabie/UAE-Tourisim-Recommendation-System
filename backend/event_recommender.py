@@ -237,6 +237,11 @@ def recommend_events(catalog_df, visitor_profile, tfidf_vectorizer, all_event_ve
         by=sort_columns, ascending=sort_ascending, kind='mergesort'
     ).reset_index(drop=True)
 
+    # Convert Categories from comma-separated string -> list, to match EventRecommendation schema
+    final_recommendations['Categories'] = final_recommendations['Categories'].apply(parse_categories)
+    # Guard against NaN descriptions, since the schema requires a str
+    final_recommendations['Description'] = final_recommendations['Description'].fillna('').astype(str)
+
     # 8. Format for FastAPI: convert dates to strings, return a JSON-safe dict
     final_recommendations['Start_Date'] = final_recommendations['Start_Date'].dt.strftime('%Y-%m-%d')
     final_recommendations['End_Date'] = final_recommendations['End_Date'].dt.strftime('%Y-%m-%d')
