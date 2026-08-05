@@ -249,6 +249,7 @@ def recommend_restaurants(user_profile, zomato, vectorizer, item_matrix):
 
     candidates_df = candidates_df[
         [
+            "restaurant_id",
             "restaurant_name",
             "city",
             "cuisines",

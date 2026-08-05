@@ -229,7 +229,7 @@ def recommend_events(catalog_df, visitor_profile, tfidf_vectorizer, all_event_ve
 
     # 7. Select and order required columns
     required_columns = [
-        'visitor_id', 'Name', 'Categories', 'Location',
+        'visitor_id','Event_ID', 'Name', 'Categories', 'Location',
         'Start_Date', 'End_Date', 'Price_Range', 'similarity_score',
         'fallback_stage', 'final_score', 'recommendation_reason', 'Description'
     ]

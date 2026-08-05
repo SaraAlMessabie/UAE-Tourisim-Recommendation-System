@@ -243,6 +243,7 @@ def recommend_attractions_with_sentiment(user_profile, attractions, vectorizer, 
 
     return final_recommendations[
         [
+            "attraction_id",
             "name",
             "price_level",
             "city",
