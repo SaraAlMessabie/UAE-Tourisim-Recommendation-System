@@ -1,21 +1,21 @@
 import streamlit as st
 import requests
 from datetime import date, datetime
- 
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
- 
+
 API_BASE_URL = "https://uae-tourisim-recommendation-system.onrender.com"  # <-- update to your real Render URL
- 
+
 LISTING_TYPES = ["Event", "Restaurant", "Attraction"]
- 
+
 st.set_page_config(page_title="UAE Tourist Recommendations", layout="wide")
- 
+
 # ---------------------------------------------------------------------------
 # Session state setup
 # ---------------------------------------------------------------------------
- 
+
 if "page" not in st.session_state:
     st.session_state.page = "landing"
 if "user_id" not in st.session_state:
@@ -25,16 +25,16 @@ if "recommendations" not in st.session_state:
 if "hearted_ids" not in st.session_state:
     # local cache so heart buttons can reflect state without re-fetching every render
     st.session_state.hearted_ids = set()
- 
- 
+
+
 def go_to(page: str):
     st.session_state.page = page
- 
- 
+
+
 # ---------------------------------------------------------------------------
 # API helpers
 # ---------------------------------------------------------------------------
- 
+
 def api_post(path: str, payload: dict):
     try:
         response = requests.post(f"{API_BASE_URL}{path}", json=payload, timeout=30)
@@ -47,8 +47,8 @@ def api_post(path: str, payload: dict):
         return response.json(), None
     except requests.exceptions.RequestException as e:
         return None, str(e)
- 
- 
+
+
 def api_get(path: str, params: dict = None):
     try:
         response = requests.get(f"{API_BASE_URL}{path}", params=params or {}, timeout=30)
@@ -61,12 +61,12 @@ def api_get(path: str, params: dict = None):
         return response.json(), None
     except requests.exceptions.RequestException as e:
         return None, str(e)
- 
- 
+
+
 # ---------------------------------------------------------------------------
 # Shared component: a single listing card (event, restaurant, or attraction)
 # ---------------------------------------------------------------------------
- 
+
 def get_listing_id(listing: dict, listing_type: str):
     id_field_map = {
         "Event": "Event_ID",
@@ -75,8 +75,8 @@ def get_listing_id(listing: dict, listing_type: str):
     }
     field = id_field_map[listing_type]
     return listing.get(field) or listing.get(field.lower()) or listing.get("id")
- 
- 
+
+
 def get_listing_name(listing: dict, listing_type: str):
     name_field_map = {
         "Event": "Name",
@@ -85,8 +85,8 @@ def get_listing_name(listing: dict, listing_type: str):
     }
     field = name_field_map[listing_type]
     return listing.get(field) or listing.get("Name") or listing.get("name") or "Untitled"
- 
- 
+
+
 def get_listing_description(listing: dict, listing_type: str):
     if listing_type == "Event":
         return listing.get("Description")
@@ -97,8 +97,8 @@ def get_listing_description(listing: dict, listing_type: str):
     if listing_type == "Attraction":
         return listing.get("description")
     return None
- 
- 
+
+
 def get_listing_details(listing: dict, listing_type: str):
     """Returns an ordered list of (label, value) detail pairs, per listing type,
     based on each catalog's real column names."""
@@ -119,7 +119,7 @@ def get_listing_details(listing: dict, listing_type: str):
         if start and end:
             details.insert(3, f"**Dates:** {start} → {end}")
         return details
- 
+
     if listing_type == "Restaurant":
         fields = [
             ("City", "city"),
@@ -136,7 +136,7 @@ def get_listing_details(listing: dict, listing_type: str):
             if listing.get(key) not in (None, "", "nan"):
                 details.append(f"**{label}:** {listing[key]}")
         return details
- 
+
     if listing_type == "Attraction":
         fields = [
             ("City", "city"),
@@ -153,32 +153,40 @@ def get_listing_details(listing: dict, listing_type: str):
             if listing.get(key) not in (None, "", "nan"):
                 details.append(f"**{label}:** {listing[key]}")
         return details
- 
+
     return []
- 
- 
-def render_listing_card(listing: dict, listing_type: str):
+
+
+def render_listing_card(listing: dict, listing_type: str, index: int = 0):
     listing_id = get_listing_id(listing, listing_type)
     name = get_listing_name(listing, listing_type)
- 
+
+    # Unique key suffix — combines listing_id (when available) with the
+    # loop index, so cards never collide even if ID extraction fails
+    # (e.g. a mismatched field name returning None for every row).
+    key_suffix = f"{listing_type}_{listing_id}_{index}"
+
+    if listing_id is None:
+        st.warning(f"⚠️ Could not find an ID field for this {listing_type} listing — heart/review actions may not work correctly for it.")
+
     with st.container(border=True):
         col1, col2 = st.columns([5, 1])
- 
+
         with col1:
             st.subheader(name)
- 
+
             description = get_listing_description(listing, listing_type)
             if description:
                 st.write(description)
- 
+
             details = get_listing_details(listing, listing_type)
             if details:
                 st.caption(" · ".join(details))
- 
+
         with col2:
-            heart_key = f"heart_{listing_type}_{listing_id}"
+            heart_key = f"heart_{key_suffix}"
             already_hearted = (listing_type, str(listing_id)) in st.session_state.hearted_ids
- 
+
             heart_label = "❤️ Hearted" if already_hearted else "🤍 Heart"
             if st.button(heart_label, key=heart_key, disabled=already_hearted):
                 if not st.session_state.user_id:
@@ -194,7 +202,7 @@ def render_listing_card(listing: dict, listing_type: str):
                     else:
                         st.session_state.hearted_ids.add((listing_type, str(listing_id)))
                         st.rerun()
- 
+
         # --- Review section (expandable so cards stay compact) ---
         with st.expander("Reviews"):
             existing, error = api_get(f"/reviews/{listing_type}/{listing_id}")
@@ -208,13 +216,13 @@ def render_listing_card(listing: dict, listing_type: str):
                     st.write(f"⭐ {rating} — {comment}  _(sentiment: {sentiment})_")
             else:
                 st.caption("No reviews yet — be the first!")
- 
+
             st.markdown("---")
-            with st.form(key=f"review_form_{listing_type}_{listing_id}", clear_on_submit=True):
-                rating = st.slider("Your rating", 1, 5, 5, key=f"rating_{listing_type}_{listing_id}")
-                comment = st.text_area("Your comment", key=f"comment_{listing_type}_{listing_id}")
+            with st.form(key=f"review_form_{key_suffix}", clear_on_submit=True):
+                rating = st.slider("Your rating", 1, 5, 5, key=f"rating_{key_suffix}")
+                comment = st.text_area("Your comment", key=f"comment_{key_suffix}")
                 submitted = st.form_submit_button("Submit review")
- 
+
                 if submitted:
                     if not st.session_state.user_id:
                         st.warning("Enter your name on the landing page first.")
@@ -233,18 +241,18 @@ def render_listing_card(listing: dict, listing_type: str):
                         else:
                             st.success(f"Review saved! Sentiment detected: {result.get('sentiment')}")
                             st.rerun()
- 
- 
+
+
 # ---------------------------------------------------------------------------
 # Page: Landing
 # ---------------------------------------------------------------------------
- 
+
 def render_landing_page():
     st.title("UAE Tourist Recommendation System")
     st.write("Plan your perfect trip across Dubai and Abu Dhabi — events, restaurants, and attractions, personalized to you.")
- 
+
     name_input = st.text_input("What should we call you?", value=st.session_state.user_id or "")
- 
+
     col1, col2 = st.columns(2)
     with col1:
         if st.button("📝 Start Quiz", use_container_width=True, type="primary"):
@@ -254,7 +262,7 @@ def render_landing_page():
                 st.session_state.user_id = name_input.strip()
                 go_to("quiz")
                 st.rerun()
- 
+
     with col2:
         if st.button("🔍 Skip to Browse", use_container_width=True):
             if not name_input.strip():
@@ -264,24 +272,24 @@ def render_landing_page():
                 load_browse_results()
                 go_to("results")
                 st.rerun()
- 
- 
+
+
 # ---------------------------------------------------------------------------
 # Page: Quiz
 # ---------------------------------------------------------------------------
- 
+
 def render_quiz_page():
     st.title("Tell us about your trip")
- 
+
     with st.form("trip_quiz"):
         col1, col2 = st.columns(2)
         with col1:
             trip_start_date = st.date_input("Trip start date", value=date.today())
         with col2:
             trip_end_date = st.date_input("Trip end date", value=date.today())
- 
+
         city = st.multiselect("Which cities?", ["Dubai", "Abu Dhabi"], default=["Dubai"])
- 
+
         col3, col4 = st.columns(2)
         with col3:
             daily_food_budget = st.select_slider(
@@ -291,45 +299,45 @@ def render_quiz_page():
             daily_attraction_budget = st.select_slider(
                 "Daily attraction budget", options=["Free", "Low", "Medium", "High"], value="Medium"
             )
- 
+
         activity_preferences = st.multiselect(
             "Activity preferences",
             ["Festival", "Cultural", "Sports", "Entertainment", "Exhibition", "Concert"],
         )
         activity_other = st.text_input("Other activities (optional)")
- 
+
         cuisine_preferences = st.multiselect(
             "Cuisine preferences",
             ["Emirati", "International", "Italian", "Indian", "Japanese", "Middle Eastern"],
         )
         cuisine_other = st.text_input("Other cuisines (optional)")
- 
+
         event_preferences = st.multiselect(
             "Event preferences",
             ["Entertainment", "Exhibition", "Concert", "Sports", "Cultural", "Festival"],
         )
- 
+
         attraction_environment = st.multiselect(
             "Preferred environment", ["Indoor", "Outdoor", "Both"]
         )
- 
+
         weather_preference = st.multiselect(
             "Weather preference", ["Cold", "Normal", "Warm"]
         )
- 
+
         traveling_with_kids = st.toggle("Traveling with kids?")
- 
+
         num_recommendations = st.slider("How many recommendations per category?", 1, 10, 5)
- 
+
         additional_notes = st.text_area("Anything else we should know? (optional)")
- 
+
         submitted = st.form_submit_button("Get my recommendations", type="primary")
- 
+
     if submitted:
         if trip_end_date < trip_start_date:
             st.error("Trip end date cannot be before the start date.")
             return
- 
+
         payload = {
             "user_id": st.session_state.user_id,
             "trip_start_date": trip_start_date.strftime("%Y-%m-%d"),
@@ -348,22 +356,22 @@ def render_quiz_page():
             "num_recommendations": num_recommendations,
             "additional_notes": additional_notes,
         }
- 
+
         with st.spinner("Finding your perfect trip..."):
             load_recommend_results(payload)
- 
+
         go_to("results")
         st.rerun()
- 
+
     if st.button("← Back"):
         go_to("landing")
         st.rerun()
- 
- 
+
+
 # ---------------------------------------------------------------------------
 # Data loading for the results page — two possible sources
 # ---------------------------------------------------------------------------
- 
+
 def load_recommend_results(payload: dict):
     endpoint_map = {
         "Event": "/recommend-events",
@@ -379,8 +387,8 @@ def load_recommend_results(payload: dict):
         else:
             results[listing_type] = data.get("recommendations", [])
     st.session_state.recommendations = results
- 
- 
+
+
 def load_browse_results():
     results = {}
     for listing_type in LISTING_TYPES:
@@ -391,15 +399,15 @@ def load_browse_results():
         else:
             results[listing_type] = data.get("recommendations", [])
     st.session_state.recommendations = results
- 
- 
+
+
 # ---------------------------------------------------------------------------
 # Page: Results / Browse (same page, different data source)
 # ---------------------------------------------------------------------------
- 
+
 def render_results_page():
     st.title(f"Welcome, {st.session_state.user_id} 👋")
- 
+
     col1, col2 = st.columns(2)
     with col1:
         if st.button("📝 Take the quiz"):
@@ -409,37 +417,37 @@ def render_results_page():
         if st.button("🔄 Refresh browse (unfiltered)"):
             load_browse_results()
             st.rerun()
- 
+
     st.divider()
- 
+
     tab_events, tab_restaurants, tab_attractions = st.tabs(["🎉 Events", "🍽️ Restaurants", "🏛️ Attractions"])
- 
+
     with tab_events:
         listings = st.session_state.recommendations.get("Event", [])
         if not listings:
             st.info("No events to show yet.")
-        for listing in listings:
-            render_listing_card(listing, "Event")
- 
+        for i, listing in enumerate(listings):
+            render_listing_card(listing, "Event", index=i)
+
     with tab_restaurants:
         listings = st.session_state.recommendations.get("Restaurant", [])
         if not listings:
             st.info("No restaurants to show yet.")
-        for listing in listings:
-            render_listing_card(listing, "Restaurant")
- 
+        for i, listing in enumerate(listings):
+            render_listing_card(listing, "Restaurant", index=i)
+
     with tab_attractions:
         listings = st.session_state.recommendations.get("Attraction", [])
         if not listings:
             st.info("No attractions to show yet.")
-        for listing in listings:
-            render_listing_card(listing, "Attraction")
- 
- 
+        for i, listing in enumerate(listings):
+            render_listing_card(listing, "Attraction", index=i)
+
+
 # ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
- 
+
 if st.session_state.page == "landing":
     render_landing_page()
 elif st.session_state.page == "quiz":
