@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Optional
 from datetime import date
 import pandas as pd
@@ -22,6 +22,27 @@ class VisitorProfileRequest(BaseModel):
     crowdedness_preference: Optional[str] = None
     traveling_with_kids: bool
     num_recommendations: int = 5
+
+    @field_validator("activity_other", "cuisine_other")
+
+    @classmethod
+
+    def clean_other_field(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        if len(value) > 100:
+            raise ValueError("This field must be 100 characters or fewer.")
+        return value
+
+    @model_validator(mode="after")
+    def check_trip_dates(self) -> "VisitorProfileRequest":
+        if self.trip_end_date is not None and self.trip_end_date < self.trip_start_date:
+            raise ValueError("Trip end date cannot be before trip start date.")
+        return self
+        
     additional_notes: Optional[str] = None
 
 
