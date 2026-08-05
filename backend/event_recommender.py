@@ -183,8 +183,6 @@ def recommend_events(catalog_df, visitor_profile, tfidf_vectorizer, all_event_ve
         event_preference=visitor_profile.get('Event_Preferences')
     )
 
-    # Track the original catalog index so compute_similarity can map candidate
-    # rows back to positional indices in all_event_vectors safely.
     candidates_df.attrs['source_index'] = catalog_df.index
 
     if candidates_df.empty:
@@ -237,10 +235,11 @@ def recommend_events(catalog_df, visitor_profile, tfidf_vectorizer, all_event_ve
         by=sort_columns, ascending=sort_ascending, kind='mergesort'
     ).reset_index(drop=True)
 
+    # Cast every schema-required string field defensively, since dtypes from the CSV can vary
+    for col in ['Event_ID', 'Name', 'Location', 'Price_Range', 'Description']:
+        final_recommendations[col] = final_recommendations[col].fillna('').astype(str)
     # Convert Categories from comma-separated string -> list, to match EventRecommendation schema
     final_recommendations['Categories'] = final_recommendations['Categories'].apply(parse_categories)
-    # Guard against NaN descriptions, since the schema requires a str
-    final_recommendations['Description'] = final_recommendations['Description'].fillna('').astype(str)
 
     # 8. Format for FastAPI: convert dates to strings, return a JSON-safe dict
     final_recommendations['Start_Date'] = final_recommendations['Start_Date'].dt.strftime('%Y-%m-%d')
