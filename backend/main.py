@@ -19,6 +19,7 @@ from models import (
     RecommendationResponse,
     HeartRequest,
     ReviewRequest,
+    UserEmailRequest
 )
 from event_recommender import recommend_events
 from restaurant_recommender import recommend_restaurants
@@ -387,6 +388,72 @@ def browse_listings(listing_type: str, limit: Optional[int] = None):
         "num_results": len(records),
         "recommendations": records,
     }
+
+def get_or_create_user(email: str) -> str:
+    email = (email or "").strip().lower()
+    df = get_sheet_as_df("Users")
+
+    if not df.empty:
+        email_col = "user_email" if "user_email" in df.columns else "User_Email"
+        id_col = "User_ID" if "User_ID" in df.columns else "user_id"
+        df[email_col] = df[email_col].astype(str).str.strip().str.lower()
+
+        match = df[df[email_col] == email]
+        if not match.empty:
+            return str(match.iloc[0][id_col])
+
+    user_id = f"U-{uuid.uuid4().hex[:8]}"
+    sheet = get_sheet("Users")
+    append_row_safe(sheet, [user_id, email], context="user")
+    return user_id
+
+@app.post("/users")
+def register_user(payload: UserEmailRequest):
+    email = (payload.email or "").strip().lower()
+    if "@" not in email or "." not in email:
+        raise HTTPException(status_code=400, detail="Invalid email address.")
+
+    user_id = get_or_create_user(email)
+    return {"status": "ok", "user_id": user_id, "email": email}
+
+
+
+def log_trip_preferences(request: VisitorProfileRequest) -> str:
+    preference_id = f"P-{uuid.uuid4().hex[:8]}"
+    sheet = get_sheet("Trip_Preferences")
+
+    row = [
+        preference_id,
+        request.user_id,
+        ", ".join(request.city),
+        str(request.trip_start_date),
+        str(request.trip_end_date) if request.trip_end_date else "",
+        request.daily_food_budget,
+        request.daily_attraction_budget,
+        ", ".join(request.activity_preferences),
+        request.activity_other or "",
+        ", ".join(request.cuisine_preferences),
+        request.cuisine_other or "",
+        ", ".join(request.event_preferences),
+        ", ".join(request.attraction_environment), 
+        ", ".join(request.weather_preference),
+        request.traveling_with_kids,
+        request.num_recommendations,
+        str(datetime.now()),
+    ]
+
+    append_row_safe(sheet, row, context="trip preference")
+    return preference_id
+
+
+@app.post("/trip-preferences")
+def submit_trip_preferences(request: VisitorProfileRequest):
+    if request.trip_end_date is not None and request.trip_end_date < request.trip_start_date:
+        raise HTTPException(status_code=400, detail="trip_end_date cannot be before trip_start_date.")
+
+    preference_id = log_trip_preferences(request)
+    return {"status": "saved", "preference_id": preference_id}
+
 
 app.add_middleware(
     CORSMiddleware,

@@ -127,6 +127,7 @@ def build_attraction_profile(req: VisitorProfileRequest) -> dict:
 
 # --- Response schemas ---
 class EventRecommendation(BaseModel):
+    Event_ID: str      
     visitor_id: str
     Name: str
     Categories: list

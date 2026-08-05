@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import re
 from datetime import date, datetime
 
 # ---------------------------------------------------------------------------
@@ -9,6 +10,7 @@ from datetime import date, datetime
 API_BASE_URL = "https://uae-tourisim-recommendation-system.onrender.com"  # <-- update to your real Render URL
 
 LISTING_TYPES = ["Event", "Restaurant", "Attraction"]
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 st.set_page_config(page_title="UAE Tourist Recommendations", layout="wide")
 
@@ -63,28 +65,73 @@ def api_get(path: str, params: dict = None):
         return None, str(e)
 
 
+def load_user_hearts(user_id: str):
+    """
+    Fetches every heart this user has ever saved (across all listing types)
+    and populates hearted_ids, so cards correctly show 'Hearted' state as
+    soon as they're rendered — not just for hearts made in this session.
+    """
+    data, error = api_get(f"/hearts/{user_id}")
+    if error:
+        # Non-fatal — just means heart buttons won't pre-fill; the app still works.
+        st.session_state.hearted_ids = set()
+        return
+
+    hearted = set()
+    for row in (data or []):
+        listing_type = row.get("Listing_Type") or row.get("listing_type")
+        listing_id = row.get("Listing_ID") or row.get("listing_id")
+        if listing_type and listing_id is not None:
+            hearted.add((listing_type, str(listing_id)))
+
+    st.session_state.hearted_ids = hearted
+
+
+def register_user(email: str):
+    """
+    Logs this email in the Users sheet (create-if-new). Non-fatal on
+    failure — the app's actual identity model still just uses the email
+    string as user_id everywhere else, this is purely a registry log.
+    """
+    result, error = api_post("/users", {"email": email})
+    if error:
+        st.warning(f"Could not register user (non-critical): {error}")
+
+
 # ---------------------------------------------------------------------------
 # Shared component: a single listing card (event, restaurant, or attraction)
 # ---------------------------------------------------------------------------
 
 def get_listing_id(listing: dict, listing_type: str):
-    id_field_map = {
-        "Event": "Event_ID",
-        "Restaurant": "restaurant_id",
-        "Attraction": "attraction_id",
+    id_field_candidates = {
+        "Event": ["Event_ID", "event_id", "EventID", "eventId", "id", "ID"],
+        "Restaurant": ["restaurant_id", "Restaurant_ID", "restaurantId", "id", "ID"],
+        "Attraction": ["attraction_id", "Attraction_ID", "attractionId", "id", "ID"],
     }
-    field = id_field_map[listing_type]
-    return listing.get(field) or listing.get(field.lower()) or listing.get("id")
+    for field in id_field_candidates.get(listing_type, []):
+        value = listing.get(field)
+        if value not in (None, ""):
+            return value
+
+    # Last resort: scan every key case-insensitively for anything containing "id"
+    for key, value in listing.items():
+        if "id" in key.lower() and value not in (None, ""):
+            return value
+
+    return None
 
 
 def get_listing_name(listing: dict, listing_type: str):
-    name_field_map = {
-        "Event": "Name",
-        "Restaurant": "restaurant_name",
-        "Attraction": "name",
+    name_field_candidates = {
+        "Event": ["Name", "name", "event_name", "Event_Name"],
+        "Restaurant": ["restaurant_name", "Restaurant_Name", "name", "Name"],
+        "Attraction": ["name", "Name", "attraction_name", "Attraction_Name"],
     }
-    field = name_field_map[listing_type]
-    return listing.get(field) or listing.get("Name") or listing.get("name") or "Untitled"
+    for field in name_field_candidates.get(listing_type, []):
+        value = listing.get(field)
+        if value not in (None, ""):
+            return value
+    return "Untitled"
 
 
 def get_listing_description(listing: dict, listing_type: str):
@@ -167,7 +214,10 @@ def render_listing_card(listing: dict, listing_type: str, index: int = 0):
     key_suffix = f"{listing_type}_{listing_id}_{index}"
 
     if listing_id is None:
-        st.warning(f"⚠️ Could not find an ID field for this {listing_type} listing — heart/review actions may not work correctly for it.")
+        st.warning(
+            f"⚠️ Could not find an ID field for this {listing_type} listing. "
+            f"Available fields: {list(listing.keys())}"
+        )
 
     with st.container(border=True):
         col1, col2 = st.columns([5, 1])
@@ -251,24 +301,28 @@ def render_landing_page():
     st.title("UAE Tourist Recommendation System")
     st.write("Plan your perfect trip across Dubai and Abu Dhabi — events, restaurants, and attractions, personalized to you.")
 
-    name_input = st.text_input("What should we call you?", value=st.session_state.user_id or "")
+    email_input = st.text_input("Enter your email to get started", value=st.session_state.user_id or "")
 
     col1, col2 = st.columns(2)
     with col1:
         if st.button("📝 Start Quiz", use_container_width=True, type="primary"):
-            if not name_input.strip():
-                st.warning("Please enter a name first.")
+            if not EMAIL_PATTERN.match(email_input.strip()):
+                st.warning("Please enter a valid email address.")
             else:
-                st.session_state.user_id = name_input.strip()
+                st.session_state.user_id = email_input.strip().lower()
+                register_user(st.session_state.user_id)
+                load_user_hearts(st.session_state.user_id)
                 go_to("quiz")
                 st.rerun()
 
     with col2:
         if st.button("🔍 Skip to Browse", use_container_width=True):
-            if not name_input.strip():
-                st.warning("Please enter a name first.")
+            if not EMAIL_PATTERN.match(email_input.strip()):
+                st.warning("Please enter a valid email address.")
             else:
-                st.session_state.user_id = name_input.strip()
+                st.session_state.user_id = email_input.strip().lower()
+                register_user(st.session_state.user_id)
+                load_user_hearts(st.session_state.user_id)
                 load_browse_results()
                 go_to("results")
                 st.rerun()
@@ -358,6 +412,7 @@ def render_quiz_page():
         }
 
         with st.spinner("Finding your perfect trip..."):
+            api_post("/trip-preferences", payload)  # logs this submission; non-blocking on failure
             load_recommend_results(payload)
 
         go_to("results")
@@ -445,8 +500,32 @@ def render_results_page():
 
 
 # ---------------------------------------------------------------------------
+# Sidebar — persistent nav, visible once the user has entered their email
+# ---------------------------------------------------------------------------
+
+def render_sidebar():
+    if not st.session_state.user_id:
+        return
+
+    with st.sidebar:
+        st.write(f"👤 {st.session_state.user_id}")
+        st.divider()
+
+        if st.button("🏠 Home / Browse", use_container_width=True):
+            load_browse_results()
+            go_to("results")
+            st.rerun()
+
+        if st.button("📝 Quiz", use_container_width=True):
+            go_to("quiz")
+            st.rerun()
+
+
+# ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
+
+render_sidebar()
 
 if st.session_state.page == "landing":
     render_landing_page()
