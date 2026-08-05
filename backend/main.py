@@ -420,7 +420,7 @@ def browse_listings(listing_type: str, limit: Optional[int] = None):
 
 def get_or_create_user(email: str) -> str:
     email = (email or "").strip().lower()
-    df = get_sheet_as_df("Users")
+    df = get_sheet_as_df("users")
 
     if not df.empty:
         email_col = "user_email" if "user_email" in df.columns else "User_Email"
@@ -432,7 +432,7 @@ def get_or_create_user(email: str) -> str:
             return str(match.iloc[0][id_col])
 
     user_id = f"U-{uuid.uuid4().hex[:8]}"
-    sheet = get_sheet("Users")
+    sheet = get_sheet("users")
     append_row_safe(sheet, [user_id, email], context="user")
     return user_id
 
@@ -449,7 +449,7 @@ def register_user(payload: UserEmailRequest):
 
 def log_trip_preferences(request: VisitorProfileRequest) -> str:
     preference_id = f"P-{uuid.uuid4().hex[:8]}"
-    sheet = get_sheet("Trip_Preferences")
+    sheet = get_sheet("trip_preferencee")
 
     row = [
         preference_id,
