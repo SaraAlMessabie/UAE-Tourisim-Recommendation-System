@@ -21,7 +21,7 @@ class VisitorProfileRequest(BaseModel):
     weather_preference: List[str] = []
     crowdedness_preference: Optional[str] = None
     traveling_with_kids: bool
-    num_recommendations: int = 5
+    num_recommendations: int = Field(default=5, gt=0, le=50)
 
     @field_validator("activity_other", "cuisine_other")
 
@@ -46,7 +46,7 @@ class VisitorProfileRequest(BaseModel):
     additional_notes: Optional[str] = None
 
 
-# --- Translation dict + builder functions (teammate's) ---
+# --- Translation dict + builder functions ---
 ACTIVITY_KEYWORDS = {
     "Culture focused (Museum/Galleries/..)": "culture museum galleries",
     "Nature focused (Beach/Desert/Parks/...)": "nature beach desert parks",
@@ -125,7 +125,7 @@ def build_attraction_profile(req: VisitorProfileRequest) -> dict:
     }
 
 
-# --- Response schemas (yours) ---
+# --- Response schemas ---
 class EventRecommendation(BaseModel):
     visitor_id: str
     Name: str
@@ -147,7 +147,7 @@ class RecommendationResponse(BaseModel):
     recommendations: List[EventRecommendation]
 
 
-# --- Hearts / Reviews request schemas (yours) ---
+# --- Hearts / Reviews request schemas  ---
 class HeartRequest(BaseModel):
     user_id: str
     listing_type: str
