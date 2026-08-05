@@ -379,6 +379,8 @@ def browse_listings(listing_type: str, limit: Optional[int] = None):
     df = catalog_df.copy()
     if limit is not None:
         df = df.head(limit)
+        
+    df = df.astype(object).where(pd.notna(df), None)
 
     records = df.to_dict(orient="records")
 
