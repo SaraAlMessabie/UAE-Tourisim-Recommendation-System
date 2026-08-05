@@ -384,7 +384,7 @@ def get_reviews(listing_type: str, listing_id: str):
         return listing_reviews.to_dict(orient="records")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch reviews: {e}")
-    
+        
 
 @app.get("/browse/{listing_type}")
 def browse_listings(listing_type: str, limit: Optional[int] = None):
@@ -407,6 +407,8 @@ def browse_listings(listing_type: str, limit: Optional[int] = None):
     df = catalog_df.copy()
     if limit is not None:
         df = df.head(limit)
+
+    df = df.astype(object).where(pd.notna(df),None)
 
     records = df.to_dict(orient="records")
 
