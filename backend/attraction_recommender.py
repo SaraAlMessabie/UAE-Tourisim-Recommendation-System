@@ -241,10 +241,12 @@ def recommend_attractions_with_sentiment(user_profile, attractions, vectorizer, 
         )
     )
 
-    return final_recommendations[
+    return final_recommendations[ 
         [
-            "attraction_id",
+            "attraction_id", 
             "name",
+            "description",
+            "location",
             "price_level",
             "city",
             "categories",
