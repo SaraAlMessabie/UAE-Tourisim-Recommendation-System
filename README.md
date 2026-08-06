@@ -3,6 +3,7 @@
 A tourist recommendation system for the UAE that generates personalized suggestions for **Events**, **Restaurants**, and **Attractions** based on a content-based recommendation model using cosine similarity. The system also collects user reviews and automatically assigns each one a **Positive** or **Negative** sentiment using a custom-trained sentiment analysis model.
 
 **Live demo:** [uae-tourisim-recommendation-system.onrender.com](https://uae-tourisim-recommendation-system.onrender.com)
+
 **Streamlit Frontend:** [https://iris-api-k8mmdmwepoer28vfzcnbaw.streamlit.app]
 
 ---
