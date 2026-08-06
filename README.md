@@ -40,8 +40,8 @@ The sentiment model was evaluated against a dummy baseline (most-frequent-class 
 ### 1. Environment Variables
 Add the following environment variables to your Render service configuration:
 
-- `GOOGLE_SERVICE_ACCOUNT_CREDENTIALS` — the contents of your Google service account JSON key
-- 'PYTHON_VERSION' - 
+- `GOOGLE_CREDENTIALS_B64` — JSON Key
+- 'PYTHON_VERSION' - 3.11.9
 
 ### 2. Google Sheets Setup
 1. Create a new Google Sheet with tabs for `Hearts`, `Reviews`, `Trip_Preferences`, and `Recommendation_Log`.
